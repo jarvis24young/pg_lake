@@ -5,6 +5,9 @@
 > 生成时间：2026-06-26。事实依据来自 `results/*.json` 的本地深度调研、pg_lake 仓库源码，以及 PostgreSQL、Apache Iceberg、DuckDB 官方文档。
 
 ---
+pg_lake整体架构是什么，IUD/检索端到端流程，用到了iceberg哪些能力
+iceberg能力范围，没有iceberg会怎么样，怎么实现快速MOR的，和OLTP数据库有什么区别，和lance有什么区别，文件格式和表格式是什么概念
+catalog是做什么的，为什么需要catalog，pg_lake承担了哪些catalog能力
 
 ## 0. 先给结论：我们到底要干什么
 
