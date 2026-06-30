@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pg_lake 全景架构与端到端流程入门</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      overflow-x: hidden;
+      padding: 28px;
+      background: #020617;
+      color: #f8fafc;
+      font-family: "JetBrains Mono", "Microsoft YaHei", monospace;
+    }
+    .container { width: min(100%, 1560px); margin: 0 auto; }
+    .header { margin-bottom: 22px; }
+    .header-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .pulse-dot {
+      width: 11px;
+      height: 11px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: #22d3ee;
+      box-shadow: 0 0 16px rgba(34, 211, 238, .65);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 50% { opacity: .45; } }
+    h1 { font-size: 24px; font-weight: 700; letter-spacing: 0; line-height: 1.35; }
+    .subtitle { margin: 8px 0 0 23px; color: #94a3b8; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+    .toolbar { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: 0 0 auto; }
+    .toolbar-actions { display: none; gap: 8px; }
+    .toolbar.expanded .toolbar-actions { display: flex; }
+    .toolbar button {
+      border: 1px solid #334155;
+      border-radius: 6px;
+      background: rgba(30, 41, 59, .82);
+      color: #cbd5e1;
+      padding: 7px 11px;
+      font: 500 11px/1 "JetBrains Mono", monospace;
+      cursor: pointer;
+    }
+    .toolbar button:hover { border-color: #64748b; color: #fff; }
+    .toolbar .toolbar-toggle {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border-color: transparent;
+      background: transparent;
+      font-size: 18px;
+    }
+    .diagram-container {
+      overflow-x: auto;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      background: rgba(15, 23, 42, .58);
+      padding: 18px;
+    }
+    svg { display: block; width: 100%; min-width: 1180px; height: auto; }
+    svg text { font-family: "JetBrains Mono", "Microsoft YaHei", monospace; letter-spacing: 0; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .card {
+      min-width: 0;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      background: rgba(15, 23, 42, .58);
+      padding: 16px;
+    }
+    .card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .card-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; }
+    .cyan { background: #22d3ee; }
+    .emerald { background: #34d399; }
+    .violet { background: #a78bfa; }
+    .amber { background: #fbbf24; }
+    .card h2 { font-size: 13px; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 11px; line-height: 1.65; }
+    .card li + li { margin-top: 5px; }
+    .card li::before { content: "- "; color: #64748b; }
+    code { color: #c4b5fd; font: inherit; }
+    .footer { margin-top: 14px; color: #475569; font-size: 10px; text-align: center; overflow-wrap: anywhere; }
+    .learning-nav {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 20px;
+      align-items: start;
+      margin-top: 28px;
+      padding: 20px 22px;
+      border-top: 1px solid #334155;
+      border-bottom: 1px solid #334155;
+      background: rgba(15, 23, 42, .42);
+    }
+    .learning-nav strong { color: #fff; font-size: 12px; line-height: 1.8; }
+    .learning-links { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+    .learning-links a {
+      color: #94a3b8;
+      font-size: 10px;
+      line-height: 1.8;
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+    }
+    .learning-links a:hover { color: #67e8f9; border-color: #22d3ee; }
+    .chapter {
+      margin-top: 64px;
+      padding-top: 28px;
+      border-top: 1px solid #1e293b;
+      scroll-margin-top: 18px;
+    }
+    .chapter-heading { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 16px; align-items: start; }
+    .chapter-index {
+      display: grid;
+      place-items: center;
+      width: 46px;
+      height: 46px;
+      border: 1px solid #334155;
+      border-radius: 50%;
+      color: #67e8f9;
+      background: rgba(8, 51, 68, .32);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .chapter-kicker { color: #64748b; font-size: 9px; font-weight: 600; text-transform: uppercase; }
+    .chapter h2 { margin-top: 6px; font-size: 22px; line-height: 1.45; letter-spacing: 0; }
+    .chapter-lead { max-width: 1060px; margin-top: 10px; color: #94a3b8; font-size: 12px; line-height: 1.85; }
+    .one-line-answer {
+      margin: 20px 0 0 70px;
+      padding-left: 14px;
+      border-left: 3px solid #22d3ee;
+      color: #e2e8f0;
+      font-size: 12px;
+      line-height: 1.8;
+    }
+    .one-line-answer strong { color: #67e8f9; }
+    .mini-diagram {
+      overflow-x: auto;
+      margin-top: 24px;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      background: rgba(15, 23, 42, .48);
+      padding: 16px;
+    }
+    .mini-diagram svg { width: 100%; min-width: 900px; height: auto; }
+    .diagram-caption { margin-top: 10px; color: #64748b; font-size: 9px; line-height: 1.7; }
+    .insight-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .insight {
+      min-width: 0;
+      padding: 15px;
+      border-top: 2px solid #334155;
+      background: rgba(15, 23, 42, .42);
+    }
+    .insight.cyan-line { border-color: #22d3ee; }
+    .insight.green-line { border-color: #34d399; }
+    .insight.violet-line { border-color: #a78bfa; }
+    .insight.amber-line { border-color: #fbbf24; }
+    .insight.rose-line { border-color: #fb7185; }
+    .insight h3 { color: #f8fafc; font-size: 11px; line-height: 1.5; }
+    .insight p { margin-top: 7px; color: #94a3b8; font-size: 10px; line-height: 1.75; }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 1px;
+      margin-top: 16px;
+      background: #1e293b;
+      border: 1px solid #1e293b;
+    }
+    .step { min-width: 0; background: #0f172a; padding: 13px 12px; }
+    .step b { display: block; color: #67e8f9; font-size: 9px; }
+    .step span { display: block; margin-top: 6px; color: #94a3b8; font-size: 9px; line-height: 1.6; }
+    .warning-note {
+      margin-top: 16px;
+      padding: 14px 16px;
+      border: 1px dashed #fb7185;
+      background: rgba(136, 19, 55, .14);
+      color: #fda4af;
+      font-size: 10px;
+      line-height: 1.8;
+    }
+    .source-note { margin-top: 16px; color: #475569; font-size: 9px; line-height: 1.7; }
+    .source-note a { color: #64748b; }
+    @media (max-width: 1050px) {
+      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .insight-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 640px) {
+      body { padding: 14px; }
+      .header-row { align-items: flex-start; }
+      h1 { font-size: 18px; overflow-wrap: anywhere; }
+      .subtitle { margin-left: 0; font-size: 11px; }
+      .toolbar { margin-left: auto; }
+      .toolbar.expanded { align-items: flex-end; flex-direction: column-reverse; }
+      .toolbar-actions { flex-direction: column; }
+      .diagram-container { padding: 10px; }
+      .cards { grid-template-columns: 1fr; }
+      .learning-nav { grid-template-columns: 1fr; gap: 8px; padding: 16px 4px; background: transparent; }
+      .learning-links { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+      .chapter { margin-top: 46px; padding-top: 22px; }
+      .chapter-heading { grid-template-columns: 40px minmax(0, 1fr); gap: 10px; }
+      .chapter-index { width: 36px; height: 36px; font-size: 10px; }
+      .chapter h2 { font-size: 17px; }
+      .chapter-lead { font-size: 11px; }
+      .one-line-answer { margin-left: 0; font-size: 11px; }
+      .mini-diagram { padding: 8px; }
+      .insight-grid { grid-template-columns: 1fr; }
+      .steps { grid-template-columns: 1fr 1fr; }
+    }
+    @media print {
+      body { padding: 12px; background: #020617; }
+      .toolbar { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container" id="report-container">
+    <header class="header">
+      <div class="header-row">
+        <span class="pulse-dot" aria-hidden="true"></span>
+        <h1>pg_lake 全景架构与端到端流程</h1>
+        <div class="toolbar">
+          <div class="toolbar-actions">
+            <button type="button" onclick="copyAsImage(this)">Copy</button>
+            <button type="button" onclick="downloadPNG(this)">PNG</button>
+            <button type="button" onclick="downloadPDF(this)">PDF</button>
+          </div>
+          <button class="toolbar-toggle" type="button" onclick="this.parentElement.classList.toggle('expanded')" title="导出选项" aria-label="导出选项">...</button>
+        </div>
+      </div>
+      <p class="subtitle">面向零数据库基础：从文件与表开始，逐步理解检索、I/U/D、快速 MOR、Iceberg、Catalog、OLTP 与 Lance。</p>
+    </header>
+
+    <main class="diagram-container">
+      <svg viewBox="0 0 1500 1100" role="img" aria-labelledby="diagram-title diagram-desc">
+        <title id="diagram-title">pg_lake 详细整体架构图</title>
+        <desc id="diagram-desc">展示 SQL 客户端、PostgreSQL 扩展、pgduck_server、DuckDB、Iceberg Catalog 与对象存储之间的查询、写入及事务提交关系。</desc>
+        <defs>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M40 0H0V40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+          <marker id="arrow-cyan" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+            <polygon points="0 0,9 3.5,0 7" fill="#22d3ee"/>
+          </marker>
+          <marker id="arrow-emerald" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+            <polygon points="0 0,9 3.5,0 7" fill="#34d399"/>
+          </marker>
+          <marker id="arrow-violet" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+            <polygon points="0 0,9 3.5,0 7" fill="#a78bfa"/>
+          </marker>
+          <marker id="arrow-amber" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+            <polygon points="0 0,9 3.5,0 7" fill="#fbbf24"/>
+          </marker>
+          <marker id="arrow-slate" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+            <polygon points="0 0,9 3.5,0 7" fill="#64748b"/>
+          </marker>
+        </defs>
+
+        <rect width="1500" height="1100" fill="#020617"/>
+        <rect width="1500" height="1100" fill="url(#grid)"/>
+
+        <!-- Connections are intentionally painted before components. -->
+        <path d="M180 112V198H290V238" fill="none" stroke="#22d3ee" stroke-width="2" marker-end="url(#arrow-cyan)"/>
+        <text x="194" y="177" fill="#67e8f9" font-size="10">SQL / PostgreSQL wire</text>
+
+        <path d="M375 330V370" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow-slate)"/>
+        <path d="M375 330V350H213V370" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow-slate)"/>
+        <path d="M375 330V350H537V370" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow-slate)"/>
+        <path d="M375 330V350H375V510" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow-slate)"/>
+
+        <path d="M300 478V510" fill="none" stroke="#22d3ee" stroke-width="2" marker-end="url(#arrow-cyan)"/>
+        <text x="312" y="497" fill="#67e8f9" font-size="9">改写 SQL + 文件裁剪</text>
+        <path d="M450 570H758" fill="none" stroke="#22d3ee" stroke-width="2" marker-end="url(#arrow-cyan)"/>
+        <text x="604" y="558" fill="#67e8f9" font-size="9" text-anchor="middle">libpq / Unix socket :5332 / 参数</text>
+        <path d="M758 600H450" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow-cyan)"/>
+        <text x="604" y="618" fill="#67e8f9" font-size="9" text-anchor="middle">PGRES_SINGLE_TUPLE 文本行结果</text>
+
+        <path d="M630 424H740V285H778" fill="none" stroke="#a78bfa" stroke-width="2" marker-end="url(#arrow-violet)"/>
+        <text x="682" y="410" fill="#c4b5fd" font-size="9">读取/更新目录</text>
+        <path d="M537 478V690" fill="none" stroke="#a78bfa" stroke-width="2" marker-end="url(#arrow-violet)"/>
+        <text x="548" y="656" fill="#c4b5fd" font-size="9">事务内变更集</text>
+        <path d="M620 750H1210V380" fill="none" stroke="#a78bfa" stroke-width="2" marker-end="url(#arrow-violet)"/>
+        <text x="920" y="738" fill="#c4b5fd" font-size="9" text-anchor="middle">PRE_COMMIT: 新 metadata / manifest / snapshot</text>
+        <path d="M1305 430V488" fill="none" stroke="#a78bfa" stroke-width="2" marker-end="url(#arrow-violet)"/>
+        <text x="1320" y="463" fill="#c4b5fd" font-size="9">metadata pointer</text>
+
+        <path d="M500 478V520H758" fill="none" stroke="#34d399" stroke-width="2" marker-end="url(#arrow-emerald)"/>
+        <text x="630" y="510" fill="#6ee7b7" font-size="9">INSERT/UPDATE/DELETE / COPY</text>
+        <path d="M965 660V820H1210" fill="none" stroke="#34d399" stroke-width="2" marker-end="url(#arrow-emerald)"/>
+        <text x="1082" y="807" fill="#6ee7b7" font-size="9" text-anchor="middle">COPY Parquet / position deletes</text>
+
+        <path d="M965 428V468" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow-slate)"/>
+        <path d="M965 548V588" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow-slate)"/>
+        <path d="M965 660V700" fill="none" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow-amber)"/>
+        <path d="M1115 750H1210V660" fill="none" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow-amber)"/>
+        <text x="1158" y="738" fill="#fde68a" font-size="9" text-anchor="middle">S3/GCS/Azure I/O</text>
+        <path d="M1210 610H1115V620" fill="none" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow-amber)"/>
+        <text x="1160" y="599" fill="#fde68a" font-size="9" text-anchor="middle">read_parquet / read_json</text>
+
+        <path d="M1320 112V210" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrow-violet)"/>
+        <path d="M1370 112V530" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrow-amber)"/>
+        <text x="1390" y="166" fill="#94a3b8" font-size="9" text-anchor="middle">跨引擎互操作</text>
+
+        <!-- External entry points -->
+        <rect x="40" y="38" width="280" height="74" rx="6" fill="#0f172a"/>
+        <rect x="40" y="38" width="280" height="74" rx="6" fill="rgba(30,41,59,.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="180" y="67" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">应用与 SQL 用户</text>
+        <text x="180" y="88" fill="#94a3b8" font-size="9" text-anchor="middle">psql / JDBC / BI / dbt / 普通 PostgreSQL 工具</text>
+
+        <rect x="1170" y="38" width="290" height="74" rx="6" fill="#0f172a"/>
+        <rect x="1170" y="38" width="290" height="74" rx="6" fill="rgba(30,41,59,.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="1315" y="67" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">外部 Iceberg 引擎</text>
+        <text x="1315" y="88" fill="#94a3b8" font-size="9" text-anchor="middle">Spark / Trino / Flink / DuckDB 等</text>
+
+        <!-- System boundary -->
+        <rect x="24" y="146" width="1452" height="826" rx="12" fill="rgba(15,23,42,.18)" stroke="#334155" stroke-width="1" stroke-dasharray="8 5"/>
+        <text x="42" y="169" fill="#cbd5e1" font-size="11" font-weight="700">pg_lake LAKEHOUSE SYSTEM</text>
+
+        <!-- PostgreSQL control plane -->
+        <rect x="48" y="188" width="660" height="754" rx="10" fill="rgba(8,51,68,.08)" stroke="#22d3ee" stroke-width="1" stroke-dasharray="7 4"/>
+        <text x="66" y="211" fill="#22d3ee" font-size="11" font-weight="700">1. PostgreSQL 控制与事务平面</text>
+
+        <rect x="90" y="238" width="570" height="92" rx="6" fill="#0f172a"/>
+        <rect x="90" y="238" width="570" height="92" rx="6" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="375" y="266" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">PostgreSQL Core</text>
+        <text x="375" y="288" fill="#94a3b8" font-size="9" text-anchor="middle">Parser / Planner / Executor / MVCC Snapshot / Transaction Manager</text>
+        <text x="375" y="308" fill="#67e8f9" font-size="8" text-anchor="middle">面向用户的数据库入口、权限语义、事务边界与回退执行器</text>
+
+        <rect x="82" y="370" width="262" height="108" rx="6" fill="#0f172a"/>
+        <rect x="82" y="370" width="262" height="108" rx="6" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="213" y="398" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">pg_lake_table</text>
+        <text x="213" y="419" fill="#94a3b8" font-size="9" text-anchor="middle">FDW + CustomScan + Planner Hooks</text>
+        <text x="213" y="440" fill="#6ee7b7" font-size="8" text-anchor="middle">全查询/局部下推 · 文件裁剪 · 可写 FDW</text>
+        <text x="213" y="458" fill="#6ee7b7" font-size="8" text-anchor="middle">ForeignScan · Join/Upper Paths · COW/MOR</text>
+
+        <rect x="406" y="370" width="262" height="108" rx="6" fill="#0f172a"/>
+        <rect x="406" y="370" width="262" height="108" rx="6" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="537" y="398" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">pg_lake_iceberg</text>
+        <text x="537" y="419" fill="#94a3b8" font-size="9" text-anchor="middle">Iceberg v2 Metadata + Catalog Bridge</text>
+        <text x="537" y="440" fill="#c4b5fd" font-size="8" text-anchor="middle">Snapshot · Manifest · Schema/Partition evolution</text>
+        <text x="537" y="458" fill="#c4b5fd" font-size="8" text-anchor="middle">REST Catalog · Object-store Catalog · VACUUM</text>
+
+        <rect x="82" y="510" width="368" height="120" rx="6" fill="#0f172a"/>
+        <rect x="82" y="510" width="368" height="120" rx="6" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="266" y="538" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">pg_lake_engine</text>
+        <text x="266" y="559" fill="#94a3b8" font-size="9" text-anchor="middle">公共 Hook / 类型序列化 / PGDuck libpq Client</text>
+        <text x="266" y="581" fill="#6ee7b7" font-size="8" text-anchor="middle">生成 read_parquet/read_csv/read_json 与 DuckDB COPY SQL</text>
+        <text x="266" y="600" fill="#6ee7b7" font-size="8" text-anchor="middle">远端文件操作 · 并行上传 · Cache Worker · 错误传播</text>
+        <text x="266" y="618" fill="#6ee7b7" font-size="8" text-anchor="middle">ProcessUtility_hook 为多个扩展提供统一入口</text>
+
+        <rect x="490" y="510" width="178" height="120" rx="6" fill="#0f172a"/>
+        <rect x="490" y="510" width="178" height="120" rx="6" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="579" y="540" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">pg_lake_copy</text>
+        <text x="579" y="562" fill="#94a3b8" font-size="8" text-anchor="middle">COPY TO / FROM</text>
+        <text x="579" y="582" fill="#94a3b8" font-size="8" text-anchor="middle">从文件建表</text>
+        <text x="579" y="602" fill="#6ee7b7" font-size="8" text-anchor="middle">导入 / 导出数据湖</text>
+
+        <rect x="82" y="690" width="260" height="126" rx="6" fill="#0f172a"/>
+        <rect x="82" y="690" width="260" height="126" rx="6" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="212" y="718" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">PostgreSQL 本地 Catalog</text>
+        <text x="212" y="741" fill="#94a3b8" font-size="8" text-anchor="middle">tables_internal / tables_external</text>
+        <text x="212" y="759" fill="#94a3b8" font-size="8" text-anchor="middle">data files / delete files / stats</text>
+        <text x="212" y="777" fill="#94a3b8" font-size="8" text-anchor="middle">field IDs / partitions / row IDs</text>
+        <text x="212" y="797" fill="#c4b5fd" font-size="8" text-anchor="middle">事务快照内可见的运行状态</text>
+
+        <rect x="382" y="690" width="286" height="126" rx="6" fill="#0f172a"/>
+        <rect x="382" y="690" width="286" height="126" rx="6" fill="rgba(136,19,55,.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="525" y="718" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">事务协调与 Metadata Commit</text>
+        <text x="525" y="741" fill="#94a3b8" font-size="8" text-anchor="middle">XACT callback: PRE_COMMIT / COMMIT / ABORT</text>
+        <text x="525" y="760" fill="#fda4af" font-size="8" text-anchor="middle">收集 data-file / schema / snapshot 变更</text>
+        <text x="525" y="779" fill="#fda4af" font-size="8" text-anchor="middle">写新 Iceberg metadata，更新 catalog pointer</text>
+        <text x="525" y="798" fill="#fda4af" font-size="8" text-anchor="middle">REST 请求延后到 COMMIT；ABORT 清理状态</text>
+
+        <rect x="82" y="848" width="586" height="64" rx="6" fill="#0f172a"/>
+        <rect x="82" y="848" width="586" height="64" rx="6" fill="rgba(30,41,59,.5)" stroke="#64748b" stroke-width="1.2"/>
+        <text x="104" y="873" fill="#e2e8f0" font-size="10" font-weight="700">PostgreSQL 的核心承诺</text>
+        <text x="104" y="894" fill="#94a3b8" font-size="8">SQL 兼容性 · 权限 · MVCC 一致性 · DDL/DML 入口 · 失败回滚 · 不可下推部分本地执行</text>
+
+        <!-- DuckDB execution plane -->
+        <rect x="736" y="188" width="432" height="754" rx="10" fill="rgba(6,78,59,.08)" stroke="#34d399" stroke-width="1" stroke-dasharray="7 4"/>
+        <text x="754" y="211" fill="#34d399" font-size="11" font-weight="700">2. 独立向量化执行平面</text>
+
+        <rect x="778" y="238" width="374" height="190" rx="8" fill="#0f172a"/>
+        <rect x="778" y="238" width="374" height="190" rx="8" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="965" y="268" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">pgduck_server</text>
+        <text x="965" y="291" fill="#94a3b8" font-size="9" text-anchor="middle">独立进程 · PostgreSQL wire protocol · Unix socket</text>
+        <rect x="806" y="312" width="145" height="76" rx="5" fill="rgba(30,41,59,.65)" stroke="#64748b"/>
+        <text x="878" y="336" fill="#e2e8f0" font-size="9" font-weight="600" text-anchor="middle">PG Protocol Server</text>
+        <text x="878" y="356" fill="#94a3b8" font-size="8" text-anchor="middle">parse/bind/execute</text>
+        <text x="878" y="373" fill="#94a3b8" font-size="8" text-anchor="middle">cancel / single-row stream</text>
+        <rect x="979" y="312" width="145" height="76" rx="5" fill="rgba(30,41,59,.65)" stroke="#64748b"/>
+        <text x="1051" y="336" fill="#e2e8f0" font-size="9" font-weight="600" text-anchor="middle">Session / Thread Pool</text>
+        <text x="1051" y="356" fill="#94a3b8" font-size="8" text-anchor="middle">每会话 DuckDB connection</text>
+        <text x="1051" y="373" fill="#94a3b8" font-size="8" text-anchor="middle">中断与资源隔离</text>
+        <text x="965" y="411" fill="#6ee7b7" font-size="8" text-anchor="middle">避免将 DuckDB 直接嵌入 PostgreSQL backend</text>
+
+        <rect x="778" y="468" width="374" height="80" rx="6" fill="#0f172a"/>
+        <rect x="778" y="468" width="374" height="80" rx="6" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="965" y="497" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">DuckDB</text>
+        <text x="965" y="519" fill="#94a3b8" font-size="9" text-anchor="middle">向量化 Filter / Project / Join / Aggregate / Sort</text>
+        <text x="965" y="537" fill="#6ee7b7" font-size="8" text-anchor="middle">Parquet / CSV / JSON / spatial / delta 扩展</text>
+
+        <rect x="778" y="588" width="374" height="72" rx="6" fill="#0f172a"/>
+        <rect x="778" y="588" width="374" height="72" rx="6" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="965" y="616" fill="#fff" font-size="12" font-weight="700" text-anchor="middle">duckdb_pglake</text>
+        <text x="965" y="638" fill="#94a3b8" font-size="8" text-anchor="middle">PostgreSQL 函数/类型兼容 · 查询监听 · pg_lake 文件函数</text>
+
+        <rect x="778" y="700" width="374" height="100" rx="6" fill="#0f172a"/>
+        <rect x="778" y="700" width="374" height="100" rx="6" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="965" y="728" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Remote Filesystem + Local Cache</text>
+        <text x="965" y="750" fill="#94a3b8" font-size="8" text-anchor="middle">httpfs / aws / azure / region-aware S3 wrappers</text>
+        <text x="965" y="769" fill="#fde68a" font-size="8" text-anchor="middle">read cache · cache-on-write staging · list/size/remove</text>
+        <text x="965" y="787" fill="#fde68a" font-size="8" text-anchor="middle">credential chain · retry · batch delete · region discovery</text>
+
+        <rect x="778" y="848" width="374" height="64" rx="6" fill="#0f172a"/>
+        <rect x="778" y="848" width="374" height="64" rx="6" fill="rgba(30,41,59,.5)" stroke="#64748b" stroke-width="1.2"/>
+        <text x="800" y="873" fill="#e2e8f0" font-size="10" font-weight="700">执行平面的核心承诺</text>
+        <text x="800" y="894" fill="#94a3b8" font-size="8">高吞吐列式扫描与写文件；不拥有 PostgreSQL 事务真相</text>
+
+        <!-- Catalog and object storage plane -->
+        <rect x="1196" y="188" width="256" height="754" rx="10" fill="rgba(120,53,15,.07)" stroke="#fbbf24" stroke-width="1" stroke-dasharray="7 4"/>
+        <text x="1214" y="211" fill="#fbbf24" font-size="11" font-weight="700">3. 共享元数据与存储平面</text>
+
+        <rect x="1210" y="238" width="228" height="192" rx="6" fill="#0f172a"/>
+        <rect x="1210" y="238" width="228" height="192" rx="6" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="1324" y="267" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Iceberg Catalog</text>
+        <text x="1324" y="289" fill="#c4b5fd" font-size="8" text-anchor="middle">逻辑表名 -> 当前 metadata.json</text>
+        <rect x="1228" y="309" width="192" height="44" rx="4" fill="rgba(30,41,59,.65)" stroke="#64748b"/>
+        <text x="1324" y="328" fill="#e2e8f0" font-size="8" font-weight="600" text-anchor="middle">REST Catalog</text>
+        <text x="1324" y="344" fill="#94a3b8" font-size="7" text-anchor="middle">OAuth / create / drop / commit</text>
+        <rect x="1228" y="366" width="192" height="44" rx="4" fill="rgba(30,41,59,.65)" stroke="#64748b"/>
+        <text x="1324" y="385" fill="#e2e8f0" font-size="8" font-weight="600" text-anchor="middle">Object-store catalog.json</text>
+        <text x="1324" y="401" fill="#94a3b8" font-size="7" text-anchor="middle">轻量导出与发现</text>
+
+        <rect x="1210" y="488" width="228" height="172" rx="6" fill="#0f172a"/>
+        <rect x="1210" y="488" width="228" height="172" rx="6" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="1324" y="517" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Iceberg 表元数据</text>
+        <text x="1324" y="542" fill="#c4b5fd" font-size="8" text-anchor="middle">metadata JSON</text>
+        <text x="1324" y="562" fill="#94a3b8" font-size="8" text-anchor="middle">Snapshot</text>
+        <text x="1324" y="582" fill="#94a3b8" font-size="8" text-anchor="middle">Manifest List</text>
+        <text x="1324" y="602" fill="#94a3b8" font-size="8" text-anchor="middle">Manifest (Avro)</text>
+        <text x="1324" y="622" fill="#94a3b8" font-size="8" text-anchor="middle">Schema / Partition Spec / Stats</text>
+        <text x="1324" y="644" fill="#c4b5fd" font-size="8" text-anchor="middle">Iceberg 是表格式，不是执行引擎</text>
+
+        <rect x="1210" y="718" width="228" height="154" rx="6" fill="#0f172a"/>
+        <rect x="1210" y="718" width="228" height="154" rx="6" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="1324" y="747" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">对象存储</text>
+        <text x="1324" y="770" fill="#fde68a" font-size="8" text-anchor="middle">S3 / GCS / Azure / 兼容存储</text>
+        <text x="1324" y="795" fill="#94a3b8" font-size="8" text-anchor="middle">Parquet data files</text>
+        <text x="1324" y="815" fill="#94a3b8" font-size="8" text-anchor="middle">Position delete files</text>
+        <text x="1324" y="835" fill="#94a3b8" font-size="8" text-anchor="middle">CSV / JSON / 原始湖文件</text>
+        <text x="1324" y="855" fill="#fde68a" font-size="8" text-anchor="middle">持久化事实与跨引擎共享边界</text>
+
+        <rect x="1210" y="888" width="228" height="24" rx="4" fill="rgba(251,146,60,.3)" stroke="#fb923c"/>
+        <text x="1324" y="904" fill="#fdba74" font-size="8" font-weight="600" text-anchor="middle">Catalog pointer 是原子提交点</text>
+
+        <!-- Flow strip -->
+        <rect x="48" y="988" width="1404" height="58" rx="8" fill="#0f172a" stroke="#334155"/>
+        <circle cx="82" cy="1017" r="10" fill="#22d3ee"/><text x="82" y="1021" fill="#020617" font-size="8" font-weight="700" text-anchor="middle">R</text>
+        <text x="101" y="1021" fill="#67e8f9" font-size="9">SELECT: SQL -> Planner/FDW -> 事务快照与文件裁剪 -> pgduck_server/DuckDB -> 对象存储 -> Tuple rows</text>
+        <circle cx="850" cy="1017" r="10" fill="#34d399"/><text x="850" y="1021" fill="#020617" font-size="8" font-weight="700" text-anchor="middle">W</text>
+        <text x="869" y="1021" fill="#6ee7b7" font-size="9">WRITE: DML/COPY -> DuckDB 写 Parquet/delete -> 本地目录变更 -> Iceberg commit</text>
+
+        <!-- Legend outside all boundaries -->
+        <text x="48" y="1080" fill="#fff" font-size="9" font-weight="700">图例</text>
+        <line x1="95" y1="1077" x2="131" y2="1077" stroke="#22d3ee" stroke-width="2" marker-end="url(#arrow-cyan)"/>
+        <text x="141" y="1080" fill="#94a3b8" font-size="8">查询/结果</text>
+        <line x1="228" y1="1077" x2="264" y2="1077" stroke="#34d399" stroke-width="2" marker-end="url(#arrow-emerald)"/>
+        <text x="274" y="1080" fill="#94a3b8" font-size="8">数据写入</text>
+        <line x1="361" y1="1077" x2="397" y2="1077" stroke="#a78bfa" stroke-width="2" marker-end="url(#arrow-violet)"/>
+        <text x="407" y="1080" fill="#94a3b8" font-size="8">元数据/Catalog</text>
+        <line x1="535" y1="1077" x2="571" y2="1077" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow-amber)"/>
+        <text x="581" y="1080" fill="#94a3b8" font-size="8">对象存储 I/O</text>
+        <rect x="715" y="1068" width="18" height="12" rx="2" fill="rgba(6,78,59,.4)" stroke="#34d399"/>
+        <text x="743" y="1080" fill="#94a3b8" font-size="8">执行组件</text>
+        <rect x="832" y="1068" width="18" height="12" rx="2" fill="rgba(76,29,149,.4)" stroke="#a78bfa"/>
+        <text x="860" y="1080" fill="#94a3b8" font-size="8">目录/元数据</text>
+        <rect x="970" y="1068" width="18" height="12" rx="2" fill="rgba(120,53,15,.3)" stroke="#fbbf24"/>
+        <text x="998" y="1080" fill="#94a3b8" font-size="8">云存储</text>
+      </svg>
+    </main>
+
+    <section class="cards" aria-label="架构说明">
+      <article class="card">
+        <div class="card-header"><span class="card-dot cyan"></span><h2>控制面：PostgreSQL</h2></div>
+        <ul>
+          <li>用户只需要连接 PostgreSQL。</li>
+          <li><code>pg_lake_table</code> 决定全量或局部下推。</li>
+          <li>PostgreSQL 快照保证目录读取一致性。</li>
+          <li>不支持下推的逻辑仍可在 PostgreSQL 执行。</li>
+        </ul>
+      </article>
+      <article class="card">
+        <div class="card-header"><span class="card-dot emerald"></span><h2>执行面：DuckDB</h2></div>
+        <ul>
+          <li><code>pgduck_server</code> 是独立进程，不嵌入 backend。</li>
+          <li>PostgreSQL 通过 libpq 和 Unix socket 发送 SQL。</li>
+          <li>DuckDB 执行列式扫描、聚合、连接和文件写入。</li>
+          <li><code>duckdb_pglake</code> 补足兼容函数与文件系统能力。</li>
+        </ul>
+      </article>
+      <article class="card">
+        <div class="card-header"><span class="card-dot violet"></span><h2>表格式：Iceberg</h2></div>
+        <ul>
+          <li>Iceberg 组织 metadata、snapshot、manifest 和文件。</li>
+          <li>Catalog 指向当前 metadata，是提交协调点。</li>
+          <li>Position delete 支持 Merge-on-Read。</li>
+          <li>外部引擎可通过相同表格式读取数据。</li>
+        </ul>
+      </article>
+      <article class="card">
+        <div class="card-header"><span class="card-dot amber"></span><h2>关键工程边界</h2></div>
+        <ul>
+          <li>PostgreSQL 事务不等于对象存储的原子事务。</li>
+          <li>写数据文件和切换 metadata pointer 必须协调。</li>
+          <li>Catalog、缓存、凭证和远端 I/O 都需独立观测。</li>
+          <li>性能收益来自文件裁剪与向量化下推。</li>
+        </ul>
+      </article>
+    </section>
+
+    <nav class="learning-nav" aria-label="小白学习目录">
+      <strong>从 0 学习路线</strong>
+      <div class="learning-links">
+        <a href="#what-is-pglake">01 pg_lake 是什么</a>
+        <a href="#file-vs-table">02 文件格式 vs 表格式</a>
+        <a href="#select-flow">03 SELECT 检索</a>
+        <a href="#iud-flow">04 I/U/D 写入</a>
+        <a href="#fast-mor">05 快速 MOR</a>
+        <a href="#iceberg-scope">06 Iceberg 能力边界</a>
+        <a href="#without-iceberg">07 没有 Iceberg</a>
+        <a href="#catalog-basics">08 Catalog 为什么需要</a>
+        <a href="#pglake-catalog">09 pg_lake 的 Catalog 能力</a>
+        <a href="#oltp-compare">10 与 OLTP 的区别</a>
+        <a href="#lance-compare">11 与 Lance 的区别</a>
+      </div>
+    </nav>
+
+    <section class="chapter" id="what-is-pglake">
+      <div class="chapter-heading">
+        <div class="chapter-index">01</div>
+        <div>
+          <div class="chapter-kicker">First principles</div>
+          <h2>pg_lake 整体架构到底是什么？</h2>
+          <p class="chapter-lead">它不是“另造一个数据库”，而是把 PostgreSQL、DuckDB、Iceberg 和对象存储拼成一个湖仓系统。每一层只做自己擅长的事情，再由 pg_lake 承担跨层协调。</p>
+        </div>
+      </div>
+      <p class="one-line-answer"><strong>一句话：</strong>你继续用 PostgreSQL 写 SQL；pg_lake 把适合的工作交给 DuckDB；Iceberg 记录哪些文件组成当前表；对象存储保存真正的数据文件。</p>
+      <div class="mini-diagram">
+        <svg viewBox="0 0 1200 390" role="img" aria-label="pg_lake 四个角色的入门图解">
+          <defs>
+            <marker id="m-role" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#64748b"/></marker>
+            <pattern id="g-role" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern>
+          </defs>
+          <rect width="1200" height="390" fill="#020617"/><rect width="1200" height="390" fill="url(#g-role)"/>
+          <path d="M245 185H330" stroke="#64748b" stroke-width="2" marker-end="url(#m-role)"/>
+          <path d="M555 185H640" stroke="#64748b" stroke-width="2" marker-end="url(#m-role)"/>
+          <path d="M865 185H950" stroke="#64748b" stroke-width="2" marker-end="url(#m-role)"/>
+          <path d="M755 250V300H445V250" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#m-role)"/>
+          <rect x="35" y="112" width="210" height="138" rx="7" fill="#0f172a"/><rect x="35" y="112" width="210" height="138" rx="7" fill="rgba(30,41,59,.5)" stroke="#94a3b8" stroke-width="1.5"/>
+          <text x="140" y="145" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">用户</text>
+          <text x="140" y="171" fill="#94a3b8" font-size="9" text-anchor="middle">只需要认识 PostgreSQL</text>
+          <text x="140" y="196" fill="#cbd5e1" font-size="9" text-anchor="middle">SELECT / INSERT / UPDATE</text>
+          <text x="140" y="216" fill="#cbd5e1" font-size="9" text-anchor="middle">DELETE / COPY / VACUUM</text>
+          <rect x="330" y="80" width="225" height="170" rx="7" fill="#0f172a"/><rect x="330" y="80" width="225" height="170" rx="7" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.5"/>
+          <text x="442" y="115" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">PostgreSQL + pg_lake</text>
+          <text x="442" y="141" fill="#67e8f9" font-size="9" text-anchor="middle">“总经理 + 翻译官”</text>
+          <text x="442" y="169" fill="#94a3b8" font-size="9" text-anchor="middle">SQL / 权限 / 事务 / Catalog</text>
+          <text x="442" y="190" fill="#94a3b8" font-size="9" text-anchor="middle">规划下推、文件裁剪、提交协调</text>
+          <text x="442" y="218" fill="#67e8f9" font-size="8" text-anchor="middle">决定谁做什么，以及何时算成功</text>
+          <rect x="640" y="80" width="225" height="170" rx="7" fill="#0f172a"/><rect x="640" y="80" width="225" height="170" rx="7" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+          <text x="752" y="115" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">pgduck_server + DuckDB</text>
+          <text x="752" y="141" fill="#6ee7b7" font-size="9" text-anchor="middle">“高吞吐加工车间”</text>
+          <text x="752" y="169" fill="#94a3b8" font-size="9" text-anchor="middle">向量化扫描 / Join / Aggregate</text>
+          <text x="752" y="190" fill="#94a3b8" font-size="9" text-anchor="middle">读 Parquet、写 Parquet、应用删除</text>
+          <text x="752" y="218" fill="#6ee7b7" font-size="8" text-anchor="middle">快速处理大批量列式数据</text>
+          <rect x="950" y="80" width="215" height="170" rx="7" fill="#0f172a"/><rect x="950" y="80" width="215" height="170" rx="7" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1.5"/>
+          <text x="1057" y="115" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">Iceberg + 对象存储</text>
+          <text x="1057" y="141" fill="#fde68a" font-size="9" text-anchor="middle">“目录账本 + 仓库”</text>
+          <text x="1057" y="169" fill="#94a3b8" font-size="9" text-anchor="middle">Snapshot / Manifest / Metadata</text>
+          <text x="1057" y="190" fill="#94a3b8" font-size="9" text-anchor="middle">Data files / Delete files</text>
+          <text x="1057" y="218" fill="#fde68a" font-size="8" text-anchor="middle">保存可共享、可追踪的表状态</text>
+          <text x="287" y="174" fill="#94a3b8" font-size="8" text-anchor="middle">SQL</text>
+          <text x="597" y="174" fill="#94a3b8" font-size="8" text-anchor="middle">下推 SQL</text>
+          <text x="907" y="174" fill="#94a3b8" font-size="8" text-anchor="middle">文件 I/O</text>
+          <rect x="330" y="306" width="535" height="48" rx="5" fill="rgba(76,29,149,.25)" stroke="#a78bfa"/>
+          <text x="597" y="327" fill="#c4b5fd" font-size="9" font-weight="600" text-anchor="middle">pg_lake 的真正难点：跨 PostgreSQL 事务、文件写入、Iceberg metadata 和 Catalog 协调一致</text>
+          <text x="597" y="344" fill="#94a3b8" font-size="8" text-anchor="middle">任何一层失败，都要知道哪些状态能回滚、哪些文件需要后续清理</text>
+        </svg>
+      </div>
+      <div class="insight-grid">
+        <article class="insight cyan-line"><h3>PostgreSQL 仍是门面</h3><p>客户端、SQL 语法、权限、事务入口和结果类型都保持 PostgreSQL 使用体验。</p></article>
+        <article class="insight green-line"><h3>DuckDB 是执行加速器</h3><p>它负责适合列式向量化的大批量文件计算，但不拥有最终事务状态。</p></article>
+        <article class="insight violet-line"><h3>Iceberg 是共享契约</h3><p>它让多个引擎对“当前表由哪些文件组成”达成一致，而不是替代数据库执行引擎。</p></article>
+      </div>
+    </section>
+
+    <section class="chapter" id="file-vs-table">
+      <div class="chapter-heading">
+        <div class="chapter-index">02</div>
+        <div>
+          <div class="chapter-kicker">Core vocabulary</div>
+          <h2>文件格式和表格式是什么概念？</h2>
+          <p class="chapter-lead">这是理解 Iceberg 的第一道门槛。Parquet 解决“一份文件怎样存得紧凑、读得快”，Iceberg 解决“许多文件怎样长期组成一张可修改、可追踪的表”。</p>
+        </div>
+      </div>
+      <p class="one-line-answer"><strong>类比：</strong>文件格式像“每一本书的印刷装订标准”；表格式像“图书馆如何登记全部书、版本、下架记录和最新目录”。</p>
+      <div class="mini-diagram">
+        <svg viewBox="0 0 1200 500" role="img" aria-label="文件格式与表格式的区别图解">
+          <defs><marker id="m-format" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#64748b"/></marker><pattern id="g-format" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern></defs>
+          <rect width="1200" height="500" fill="#020617"/><rect width="1200" height="500" fill="url(#g-format)"/>
+          <path d="M280 220H410" stroke="#64748b" stroke-width="2" marker-end="url(#m-format)"/>
+          <path d="M790 220H920" stroke="#64748b" stroke-width="2" marker-end="url(#m-format)"/>
+          <rect x="38" y="70" width="242" height="330" rx="8" fill="#0f172a"/><rect x="38" y="70" width="242" height="330" rx="8" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1.5"/>
+          <text x="159" y="108" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">文件格式</text>
+          <text x="159" y="133" fill="#fde68a" font-size="10" text-anchor="middle">Parquet / CSV / JSON / Lance</text>
+          <text x="67" y="173" fill="#f8fafc" font-size="9">它回答：</text>
+          <text x="67" y="198" fill="#94a3b8" font-size="9">一份物理文件的字节怎么排？</text>
+          <text x="67" y="224" fill="#94a3b8" font-size="9">列、页、Row Group 怎么编码？</text>
+          <text x="67" y="250" fill="#94a3b8" font-size="9">压缩、统计、类型怎样记录？</text>
+          <rect x="68" y="286" width="182" height="78" rx="5" fill="rgba(30,41,59,.65)" stroke="#64748b"/>
+          <text x="159" y="313" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">一个 Parquet 文件</text>
+          <text x="159" y="335" fill="#94a3b8" font-size="8" text-anchor="middle">header · column chunks · stats</text>
+          <text x="159" y="352" fill="#94a3b8" font-size="8" text-anchor="middle">footer · compression · encoding</text>
+          <text x="345" y="207" fill="#94a3b8" font-size="9" text-anchor="middle">还缺少</text>
+          <text x="345" y="227" fill="#fb7185" font-size="8" text-anchor="middle">“哪些文件属于表？”</text>
+          <rect x="410" y="45" width="380" height="390" rx="8" fill="#0f172a"/><rect x="410" y="45" width="380" height="390" rx="8" fill="rgba(76,29,149,.32)" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="600" y="83" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">表格式：Apache Iceberg</text>
+          <text x="600" y="108" fill="#c4b5fd" font-size="9" text-anchor="middle">把许多不可变文件组织成一张随时间演化的逻辑表</text>
+          <rect x="520" y="133" width="160" height="48" rx="5" fill="rgba(76,29,149,.45)" stroke="#a78bfa"/>
+          <text x="600" y="162" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">当前 metadata.json</text>
+          <path d="M600 181V213" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m-format)"/>
+          <rect x="500" y="213" width="200" height="48" rx="5" fill="rgba(76,29,149,.35)" stroke="#a78bfa"/>
+          <text x="600" y="242" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">Snapshot + Manifest List</text>
+          <path d="M600 261V293" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m-format)"/>
+          <rect x="450" y="293" width="130" height="52" rx="5" fill="rgba(30,41,59,.65)" stroke="#64748b"/>
+          <text x="515" y="316" fill="#fff" font-size="9" text-anchor="middle">Manifest A</text><text x="515" y="334" fill="#94a3b8" font-size="8" text-anchor="middle">分区 + 文件统计</text>
+          <rect x="620" y="293" width="130" height="52" rx="5" fill="rgba(30,41,59,.65)" stroke="#64748b"/>
+          <text x="685" y="316" fill="#fff" font-size="9" text-anchor="middle">Manifest B</text><text x="685" y="334" fill="#94a3b8" font-size="8" text-anchor="middle">data/delete files</text>
+          <path d="M515 345V376" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#m-format)"/><path d="M685 345V376" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#m-format)"/>
+          <rect x="442" y="376" width="146" height="38" rx="4" fill="rgba(120,53,15,.3)" stroke="#fbbf24"/><text x="515" y="400" fill="#fde68a" font-size="8" text-anchor="middle">Parquet data files</text>
+          <rect x="612" y="376" width="146" height="38" rx="4" fill="rgba(120,53,15,.3)" stroke="#fbbf24"/><text x="685" y="400" fill="#fde68a" font-size="8" text-anchor="middle">Position delete files</text>
+          <text x="855" y="207" fill="#94a3b8" font-size="9" text-anchor="middle">再加上</text>
+          <text x="855" y="227" fill="#34d399" font-size="8" text-anchor="middle">提交、版本与发现</text>
+          <rect x="920" y="70" width="242" height="330" rx="8" fill="#0f172a"/><rect x="920" y="70" width="242" height="330" rx="8" fill="rgba(6,78,59,.35)" stroke="#34d399" stroke-width="1.5"/>
+          <text x="1041" y="108" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">表级能力</text>
+          <text x="950" y="153" fill="#6ee7b7" font-size="9">01  Snapshot / 时间点版本</text>
+          <text x="950" y="185" fill="#6ee7b7" font-size="9">02  Schema evolution</text>
+          <text x="950" y="217" fill="#6ee7b7" font-size="9">03  Partition evolution</text>
+          <text x="950" y="249" fill="#6ee7b7" font-size="9">04  Row-level delete 表达</text>
+          <text x="950" y="281" fill="#6ee7b7" font-size="9">05  原子 metadata pointer commit</text>
+          <text x="950" y="313" fill="#6ee7b7" font-size="9">06  Catalog 发现与跨引擎互操作</text>
+          <text x="1041" y="357" fill="#94a3b8" font-size="8" text-anchor="middle">它不规定由哪个查询引擎执行 SQL</text>
+          <text x="600" y="472" fill="#e2e8f0" font-size="10" font-weight="600" text-anchor="middle">文件格式是“砖块标准”；表格式是“建筑图纸、版本记录和验收规则”</text>
+        </svg>
+      </div>
+      <div class="insight-grid">
+        <article class="insight amber-line"><h3>Parquet 不等于 Iceberg</h3><p>Parquet 可以单独存在；Iceberg 表通常引用许多 Parquet 文件，并额外管理版本、删除和演化。</p></article>
+        <article class="insight violet-line"><h3>表格式不负责算 SQL</h3><p>Iceberg 提供元数据契约。真正扫描、过滤和聚合文件的是 DuckDB、Spark、Trino 等引擎。</p></article>
+        <article class="insight green-line"><h3>pg_lake 同时跨两层</h3><p>写文件时遵守 Parquet；提交表状态时遵守 Iceberg；入口和事务语义来自 PostgreSQL。</p></article>
+      </div>
+    </section>
+
+    <section class="chapter" id="select-flow">
+      <div class="chapter-heading">
+        <div class="chapter-index">03</div>
+        <div>
+          <div class="chapter-kicker">Read path</div>
+          <h2>一次 SELECT 检索从头到尾怎么走？</h2>
+          <p class="chapter-lead">查询并不是 PostgreSQL 收到 SQL 后立刻让 DuckDB 扫所有文件。pg_lake 先规划下推，再在执行开始时绑定事务快照、找到真正需要的文件并做裁剪。</p>
+        </div>
+      </div>
+      <p class="one-line-answer"><strong>关键思想：</strong>先用 PostgreSQL 的语义和事务视角决定“查什么”，再用 Iceberg 元数据缩小“查哪些文件”，最后让 DuckDB 高速执行“怎样查”。</p>
+      <div class="mini-diagram">
+        <svg viewBox="0 0 1200 455" role="img" aria-label="pg_lake SELECT 端到端流程">
+          <defs><marker id="m-select" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#22d3ee"/></marker><pattern id="g-select" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern></defs>
+          <rect width="1200" height="455" fill="#020617"/><rect width="1200" height="455" fill="url(#g-select)"/>
+          <path d="M190 185H225" stroke="#22d3ee" stroke-width="2" marker-end="url(#m-select)"/><path d="M385 185H420" stroke="#22d3ee" stroke-width="2" marker-end="url(#m-select)"/><path d="M580 185H615" stroke="#22d3ee" stroke-width="2" marker-end="url(#m-select)"/><path d="M775 185H810" stroke="#22d3ee" stroke-width="2" marker-end="url(#m-select)"/><path d="M970 185H1005" stroke="#22d3ee" stroke-width="2" marker-end="url(#m-select)"/>
+          <path d="M1085 245V330H120V245" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#m-select)"/>
+          <text x="600" y="350" fill="#67e8f9" font-size="9" text-anchor="middle">单行流式结果：DuckDB chunk -> PostgreSQL wire text -> Datum / HeapTuple -> 客户端</text>
+          <g><rect x="30" y="108" width="160" height="137" rx="7" fill="#0f172a"/><rect x="30" y="108" width="160" height="137" rx="7" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.5"/><circle cx="58" cy="137" r="13" fill="#22d3ee"/><text x="58" y="141" fill="#020617" font-size="9" font-weight="700" text-anchor="middle">1</text><text x="110" y="141" fill="#fff" font-size="10" font-weight="700" text-anchor="middle">解析 SQL</text><text x="110" y="169" fill="#94a3b8" font-size="8" text-anchor="middle">PostgreSQL parser</text><text x="110" y="188" fill="#94a3b8" font-size="8" text-anchor="middle">权限 / 类型 / 表引用</text><text x="110" y="217" fill="#67e8f9" font-size="8" text-anchor="middle">用户语义入口</text></g>
+          <g><rect x="225" y="108" width="160" height="137" rx="7" fill="#0f172a"/><rect x="225" y="108" width="160" height="137" rx="7" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.5"/><circle cx="253" cy="137" r="13" fill="#22d3ee"/><text x="253" y="141" fill="#020617" font-size="9" font-weight="700" text-anchor="middle">2</text><text x="305" y="141" fill="#fff" font-size="10" font-weight="700" text-anchor="middle">决定下推</text><text x="305" y="169" fill="#94a3b8" font-size="8" text-anchor="middle">CustomScan 全查询</text><text x="305" y="188" fill="#94a3b8" font-size="8" text-anchor="middle">或 ForeignScan 局部</text><text x="305" y="217" fill="#67e8f9" font-size="8" text-anchor="middle">检查函数/类型可下推性</text></g>
+          <g><rect x="420" y="108" width="160" height="137" rx="7" fill="#0f172a"/><rect x="420" y="108" width="160" height="137" rx="7" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/><circle cx="448" cy="137" r="13" fill="#a78bfa"/><text x="448" y="141" fill="#020617" font-size="9" font-weight="700" text-anchor="middle">3</text><text x="500" y="141" fill="#fff" font-size="10" font-weight="700" text-anchor="middle">创建 Scan Snapshot</text><text x="500" y="169" fill="#94a3b8" font-size="8" text-anchor="middle">GetTransactionSnapshot</text><text x="500" y="188" fill="#94a3b8" font-size="8" text-anchor="middle">参数 + relation restrictions</text><text x="500" y="217" fill="#c4b5fd" font-size="8" text-anchor="middle">执行时才固定文件视图</text></g>
+          <g><rect x="615" y="108" width="160" height="137" rx="7" fill="#0f172a"/><rect x="615" y="108" width="160" height="137" rx="7" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/><circle cx="643" cy="137" r="13" fill="#a78bfa"/><text x="643" y="141" fill="#020617" font-size="9" font-weight="700" text-anchor="middle">4</text><text x="695" y="141" fill="#fff" font-size="10" font-weight="700" text-anchor="middle">发现并裁剪文件</text><text x="695" y="169" fill="#94a3b8" font-size="8" text-anchor="middle">Catalog 或 Iceberg manifests</text><text x="695" y="188" fill="#94a3b8" font-size="8" text-anchor="middle">分区 + min/max + predicate</text><text x="695" y="217" fill="#c4b5fd" font-size="8" text-anchor="middle">跳过确定不匹配的文件</text></g>
+          <g><rect x="810" y="108" width="160" height="137" rx="7" fill="#0f172a"/><rect x="810" y="108" width="160" height="137" rx="7" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/><circle cx="838" cy="137" r="13" fill="#34d399"/><text x="838" y="141" fill="#020617" font-size="9" font-weight="700" text-anchor="middle">5</text><text x="890" y="141" fill="#fff" font-size="10" font-weight="700" text-anchor="middle">生成 DuckDB SQL</text><text x="890" y="169" fill="#94a3b8" font-size="8" text-anchor="middle">read_parquet(file list)</text><text x="890" y="188" fill="#94a3b8" font-size="8" text-anchor="middle">filter / join / aggregate</text><text x="890" y="217" fill="#6ee7b7" font-size="8" text-anchor="middle">必要时附加 delete anti-join</text></g>
+          <g><rect x="1005" y="108" width="160" height="137" rx="7" fill="#0f172a"/><rect x="1005" y="108" width="160" height="137" rx="7" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/><circle cx="1033" cy="137" r="13" fill="#34d399"/><text x="1033" y="141" fill="#020617" font-size="9" font-weight="700" text-anchor="middle">6</text><text x="1085" y="141" fill="#fff" font-size="10" font-weight="700" text-anchor="middle">执行与流式返回</text><text x="1085" y="169" fill="#94a3b8" font-size="8" text-anchor="middle">pgduck_server + DuckDB</text><text x="1085" y="188" fill="#94a3b8" font-size="8" text-anchor="middle">vectorized file scan</text><text x="1085" y="217" fill="#6ee7b7" font-size="8" text-anchor="middle">PGRES_SINGLE_TUPLE</text></g>
+          <rect x="125" y="383" width="950" height="38" rx="5" fill="rgba(30,41,59,.65)" stroke="#64748b"/>
+          <text x="600" y="407" fill="#cbd5e1" font-size="9" text-anchor="middle">为什么不在规划阶段固定文件列表？因为规划后到执行前表可能变化；执行开始时绑定快照才能保持事务一致。</text>
+        </svg>
+      </div>
+      <div class="steps">
+        <div class="step"><b>01 Parser</b><span>识别 SQL、类型、权限和表。</span></div><div class="step"><b>02 Planner</b><span>判断整条或局部查询能否交给 DuckDB。</span></div><div class="step"><b>03 Snapshot</b><span>用 PostgreSQL 事务快照固定可见元数据。</span></div><div class="step"><b>04 Pruning</b><span>按分区和列统计跳过不相关文件。</span></div><div class="step"><b>05 Execute</b><span>DuckDB 执行 read_parquet 与下推算子。</span></div><div class="step"><b>06 Return</b><span>结果转换为 PostgreSQL tuple 返回。</span></div>
+      </div>
+      <div class="warning-note">有 position delete 时，DuckDB 还要读取文件名和行号，并用 <code>(file_path, pos)</code> 反连接过滤已删除行；这就是 MOR 的读时合并成本。</div>
+    </section>
+
+    <section class="chapter" id="iud-flow">
+      <div class="chapter-heading">
+        <div class="chapter-index">04</div>
+        <div>
+          <div class="chapter-kicker">Write path</div>
+          <h2>INSERT / UPDATE / DELETE 端到端怎么走？</h2>
+          <p class="chapter-lead">湖表中的数据文件通常是不可变的，因此修改一行并不是“原地改几个字节”。pg_lake 把修改转换为新增数据文件、删除文件或替换文件，再提交新的 Iceberg 表版本。</p>
+        </div>
+      </div>
+      <p class="one-line-answer"><strong>最重要的等式：</strong><code>UPDATE = DELETE 旧行 + INSERT 新行</code>；小范围 DELETE 通常写 position delete，大范围 DELETE 倾向重写数据文件。</p>
+      <div class="mini-diagram">
+        <svg viewBox="0 0 1200 610" role="img" aria-label="pg_lake IUD 写入端到端流程">
+          <defs><marker id="m-iud" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#64748b"/></marker><pattern id="g-iud" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern></defs>
+          <rect width="1200" height="610" fill="#020617"/><rect width="1200" height="610" fill="url(#g-iud)"/>
+          <path d="M205 120H310" stroke="#34d399" stroke-width="2" marker-end="url(#m-iud)"/><path d="M520 120H640" stroke="#34d399" stroke-width="2" marker-end="url(#m-iud)"/><path d="M850 120H970" stroke="#34d399" stroke-width="2" marker-end="url(#m-iud)"/>
+          <path d="M205 280H310" stroke="#a78bfa" stroke-width="2" marker-end="url(#m-iud)"/><path d="M520 280H640" stroke="#a78bfa" stroke-width="2" marker-end="url(#m-iud)"/><path d="M850 280H970" stroke="#a78bfa" stroke-width="2" marker-end="url(#m-iud)"/>
+          <path d="M205 445H310" stroke="#fbbf24" stroke-width="2" marker-end="url(#m-iud)"/><path d="M520 445H640" stroke="#fbbf24" stroke-width="2" marker-end="url(#m-iud)"/><path d="M850 445H970" stroke="#fbbf24" stroke-width="2" marker-end="url(#m-iud)"/>
+          <path d="M1070 168V520H1070" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="6 4"/>
+          <rect x="25" y="42" width="1150" height="126" rx="8" fill="rgba(6,78,59,.08)" stroke="#34d399" stroke-dasharray="7 4"/>
+          <text x="43" y="65" fill="#34d399" font-size="10" font-weight="700">INSERT：纯追加</text>
+          <rect x="55" y="82" width="150" height="64" rx="5" fill="#0f172a" stroke="#34d399"/><text x="130" y="108" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">PostgreSQL rows</text><text x="130" y="128" fill="#94a3b8" font-size="8" text-anchor="middle">ExecForeignInsert</text>
+          <rect x="310" y="82" width="210" height="64" rx="5" fill="#0f172a" stroke="#34d399"/><text x="415" y="108" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">分区路由 + 临时 CSV buffer</text><text x="415" y="128" fill="#94a3b8" font-size="8" text-anchor="middle">按目标文件大小批量积累</text>
+          <rect x="640" y="82" width="210" height="64" rx="5" fill="#0f172a" stroke="#34d399"/><text x="745" y="108" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">DuckDB COPY -> Parquet</text><text x="745" y="128" fill="#94a3b8" font-size="8" text-anchor="middle">压缩 / row group / field IDs</text>
+          <rect x="970" y="82" width="165" height="64" rx="5" fill="#0f172a" stroke="#a78bfa"/><text x="1052" y="108" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">ADD_DATA_FILE</text><text x="1052" y="128" fill="#c4b5fd" font-size="8" text-anchor="middle">加入本次事务变更集</text>
+          <rect x="25" y="202" width="1150" height="126" rx="8" fill="rgba(76,29,149,.08)" stroke="#a78bfa" stroke-dasharray="7 4"/>
+          <text x="43" y="225" fill="#a78bfa" font-size="10" font-weight="700">UPDATE：找到旧行，再执行 DELETE + INSERT</text>
+          <rect x="55" y="242" width="150" height="64" rx="5" fill="#0f172a" stroke="#a78bfa"/><text x="130" y="268" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">扫描时生成 synthetic ctid</text><text x="130" y="288" fill="#94a3b8" font-size="8" text-anchor="middle">filename + file_row_number</text>
+          <rect x="310" y="242" width="210" height="64" rx="5" fill="#0f172a" stroke="#a78bfa"/><text x="415" y="268" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">解码旧行位置</text><text x="415" y="288" fill="#94a3b8" font-size="8" text-anchor="middle">source file id + zero-based pos</text>
+          <rect x="640" y="242" width="210" height="64" rx="5" fill="#0f172a" stroke="#a78bfa"/><text x="745" y="268" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">旧行进入 DELETE 分支</text><text x="745" y="288" fill="#94a3b8" font-size="8" text-anchor="middle">新行进入 INSERT 分支</text>
+          <rect x="970" y="242" width="165" height="64" rx="5" fill="#0f172a" stroke="#a78bfa"/><text x="1052" y="268" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">原子提交同一新版本</text><text x="1052" y="288" fill="#c4b5fd" font-size="8" text-anchor="middle">旧行不可见 + 新行可见</text>
+          <rect x="25" y="362" width="1150" height="166" rx="8" fill="rgba(120,53,15,.07)" stroke="#fbbf24" stroke-dasharray="7 4"/>
+          <text x="43" y="385" fill="#fbbf24" font-size="10" font-weight="700">DELETE：根据删除规模选择三条路径</text>
+          <rect x="55" y="405" width="150" height="80" rx="5" fill="#0f172a" stroke="#fbbf24"/><text x="130" y="432" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">定位 file + row pos</text><text x="130" y="454" fill="#94a3b8" font-size="8" text-anchor="middle">来自 synthetic ctid</text><text x="130" y="472" fill="#94a3b8" font-size="8" text-anchor="middle">并统计每文件删除比例</text>
+          <rect x="310" y="405" width="210" height="80" rx="5" fill="#0f172a" stroke="#fbbf24"/><text x="415" y="429" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">决策</text><text x="415" y="451" fill="#94a3b8" font-size="8" text-anchor="middle">整文件匹配？删除比例高？</text><text x="415" y="469" fill="#94a3b8" font-size="8" text-anchor="middle">累计 delete rows 是否过多？</text>
+          <rect x="640" y="395" width="210" height="100" rx="5" fill="#0f172a" stroke="#fbbf24"/><text x="745" y="419" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">A. 整文件：metadata remove</text><text x="745" y="441" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">B. 少量：position delete (MOR)</text><text x="745" y="463" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">C. 大量：重写幸存行 (COW)</text><text x="745" y="484" fill="#94a3b8" font-size="8" text-anchor="middle">避免不必要的全文件重写</text>
+          <rect x="970" y="405" width="165" height="80" rx="5" fill="#0f172a" stroke="#a78bfa"/><text x="1052" y="431" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">记录 Metadata Ops</text><text x="1052" y="453" fill="#c4b5fd" font-size="8" text-anchor="middle">add/remove data file</text><text x="1052" y="471" fill="#c4b5fd" font-size="8" text-anchor="middle">add delete file</text>
+          <rect x="350" y="555" width="500" height="38" rx="5" fill="rgba(76,29,149,.32)" stroke="#a78bfa"/>
+          <text x="600" y="579" fill="#e2e8f0" font-size="9" font-weight="600" text-anchor="middle">PRE_COMMIT：生成 Snapshot / Manifest / metadata.json -> 更新 Catalog pointer</text>
+        </svg>
+      </div>
+      <div class="insight-grid">
+        <article class="insight green-line"><h3>INSERT 为什么简单</h3><p>它只需要生成新的不可变数据文件，并把文件加入新的表版本，不需要改旧文件。</p></article>
+        <article class="insight violet-line"><h3>UPDATE 为什么更贵</h3><p>它同时包含旧行删除和新行追加，需要保持两部分在同一事务版本里一起可见。</p></article>
+        <article class="insight amber-line"><h3>TRUNCATE 是什么</h3><p>它可以直接从新表版本中移除全部数据文件引用，而不必逐行扫描和删除。</p></article>
+      </div>
+    </section>
+
+    <section class="chapter" id="fast-mor">
+      <div class="chapter-heading">
+        <div class="chapter-index">05</div>
+        <div>
+          <div class="chapter-kicker">Merge-on-Read</div>
+          <h2>pg_lake 怎么实现快速 MOR？</h2>
+          <p class="chapter-lead">MOR 的目标是让小范围 UPDATE/DELETE 不重写大 Parquet 文件。写入时只记录“哪一行已删除”，读取时再把数据文件和删除文件合并，后台通过 VACUUM 控制长期成本。</p>
+        </div>
+      </div>
+      <p class="one-line-answer"><strong>不是免费加速：</strong>MOR 把成本从“每次写都重写大文件”移动到“读时过滤 + 之后压实”。它适合少量修改，不适合无限积累删除文件。</p>
+      <div class="mini-diagram">
+        <svg viewBox="0 0 1200 555" role="img" aria-label="pg_lake 快速 MOR 实现图解">
+          <defs><marker id="m-mor" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#64748b"/></marker><pattern id="g-mor" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern></defs>
+          <rect width="1200" height="555" fill="#020617"/><rect width="1200" height="555" fill="url(#g-mor)"/>
+          <path d="M205 145H300" stroke="#34d399" stroke-width="2" marker-end="url(#m-mor)"/><path d="M510 145H605" stroke="#34d399" stroke-width="2" marker-end="url(#m-mor)"/><path d="M815 145H910" stroke="#34d399" stroke-width="2" marker-end="url(#m-mor)"/>
+          <path d="M1020 205V286" stroke="#22d3ee" stroke-width="2" marker-end="url(#m-mor)"/><path d="M910 346H815" stroke="#22d3ee" stroke-width="2" marker-end="url(#m-mor)"/><path d="M605 346H510" stroke="#22d3ee" stroke-width="2" marker-end="url(#m-mor)"/><path d="M300 346H205" stroke="#22d3ee" stroke-width="2" marker-end="url(#m-mor)"/>
+          <path d="M600 406V482" stroke="#fbbf24" stroke-width="2" marker-end="url(#m-mor)"/><path d="M760 510H960V205" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#m-mor)"/>
+          <text x="600" y="45" fill="#34d399" font-size="11" font-weight="700" text-anchor="middle">写时：少量删除只写一个小 delete file，不复制整份大 data file</text>
+          <rect x="35" y="90" width="170" height="115" rx="6" fill="#0f172a" stroke="#34d399"/><text x="120" y="120" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">DELETE / UPDATE</text><text x="120" y="146" fill="#94a3b8" font-size="8" text-anchor="middle">synthetic ctid</text><text x="120" y="166" fill="#94a3b8" font-size="8" text-anchor="middle">file id + row position</text><text x="120" y="188" fill="#6ee7b7" font-size="8" text-anchor="middle">精确定位旧行</text>
+          <rect x="300" y="90" width="210" height="115" rx="6" fill="#0f172a" stroke="#34d399"/><text x="405" y="118" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">每源文件积累删除位置</text><text x="405" y="144" fill="#94a3b8" font-size="8" text-anchor="middle">临时 CSV: file_path, pos</text><text x="405" y="166" fill="#94a3b8" font-size="8" text-anchor="middle">不触碰原 Parquet data file</text><text x="405" y="188" fill="#6ee7b7" font-size="8" text-anchor="middle">写放大小</text>
+          <rect x="605" y="90" width="210" height="115" rx="6" fill="#0f172a" stroke="#34d399"/><text x="710" y="118" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">DuckDB 写 Position Delete</text><text x="710" y="144" fill="#94a3b8" font-size="8" text-anchor="middle">转换为 Parquet delete file</text><text x="710" y="166" fill="#94a3b8" font-size="8" text-anchor="middle">符合 Iceberg v2 语义</text><text x="710" y="188" fill="#6ee7b7" font-size="8" text-anchor="middle">只记录被删位置</text>
+          <rect x="910" y="90" width="255" height="115" rx="6" fill="#0f172a" stroke="#a78bfa"/><text x="1037" y="118" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">新 Snapshot 同时引用</text><text x="1037" y="144" fill="#fde68a" font-size="8" text-anchor="middle">原 Data File</text><text x="1037" y="166" fill="#c4b5fd" font-size="8" text-anchor="middle">+ Position Delete File</text><text x="1037" y="188" fill="#94a3b8" font-size="8" text-anchor="middle">旧行在逻辑上已不可见</text>
+          <text x="600" y="265" fill="#22d3ee" font-size="11" font-weight="700" text-anchor="middle">读时：DuckDB 用 filename + file_row_number 反连接删除位置</text>
+          <rect x="910" y="286" width="255" height="120" rx="6" fill="#0f172a" stroke="#22d3ee"/><text x="1037" y="315" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">read_parquet(data files)</text><text x="1037" y="340" fill="#94a3b8" font-size="8" text-anchor="middle">附加 filename</text><text x="1037" y="360" fill="#94a3b8" font-size="8" text-anchor="middle">附加 file_row_number</text><text x="1037" y="385" fill="#67e8f9" font-size="8" text-anchor="middle">仅在删除/ctid 需要时开启</text>
+          <rect x="605" y="286" width="210" height="120" rx="6" fill="#0f172a" stroke="#22d3ee"/><text x="710" y="315" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">read_parquet(delete files)</text><text x="710" y="340" fill="#94a3b8" font-size="8" text-anchor="middle">得到 (file_path, pos)</text><text x="710" y="364" fill="#94a3b8" font-size="8" text-anchor="middle">只读紧凑删除记录</text><text x="710" y="388" fill="#67e8f9" font-size="8" text-anchor="middle">向量化批量处理</text>
+          <rect x="300" y="286" width="210" height="120" rx="6" fill="#0f172a" stroke="#22d3ee"/><text x="405" y="315" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">Anti Join / NOT IN</text><text x="405" y="340" fill="#94a3b8" font-size="8" text-anchor="middle">排除匹配的 file + row</text><text x="405" y="364" fill="#94a3b8" font-size="8" text-anchor="middle">Filter / Project 继续下推</text><text x="405" y="388" fill="#67e8f9" font-size="8" text-anchor="middle">读取时合并最新视图</text>
+          <rect x="35" y="286" width="170" height="120" rx="6" fill="#0f172a" stroke="#22d3ee"/><text x="120" y="319" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">返回可见行</text><text x="120" y="346" fill="#94a3b8" font-size="8" text-anchor="middle">删除列对用户隐藏</text><text x="120" y="370" fill="#94a3b8" font-size="8" text-anchor="middle">转换 PostgreSQL tuple</text><text x="120" y="391" fill="#67e8f9" font-size="8" text-anchor="middle">逻辑结果正确</text>
+          <rect x="440" y="482" width="320" height="54" rx="6" fill="rgba(120,53,15,.3)" stroke="#fbbf24"/><text x="600" y="504" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">VACUUM / Compaction</text><text x="600" y="523" fill="#fde68a" font-size="8" text-anchor="middle">应用全部 deletes -> 重写幸存行 -> 合并 manifests -> 清理无引用文件</text>
+          <rect x="35" y="482" width="325" height="54" rx="6" fill="rgba(136,19,55,.25)" stroke="#fb7185"/><text x="197" y="504" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">何时不继续 MOR？</text><text x="197" y="523" fill="#fda4af" font-size="8" text-anchor="middle">默认单文件删除比例约 20% 或表级累计删除过多时转 COW</text>
+          <rect x="840" y="482" width="325" height="54" rx="6" fill="rgba(30,41,59,.6)" stroke="#64748b"/><text x="1002" y="504" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">阈值可配置</text><text x="1002" y="523" fill="#94a3b8" font-size="8" text-anchor="middle">0 强制 COW；100 强制 MOR；表级默认上限 10,000,000 rows</text>
+        </svg>
+      </div>
+      <div class="insight-grid">
+        <article class="insight green-line"><h3>为什么写得快</h3><p>只写很小的 position delete 文件，避免为删除几行复制整个大 Parquet 文件。</p></article>
+        <article class="insight cyan-line"><h3>为什么读还能快</h3><p>删除合并被下推到 DuckDB 的向量化 Parquet 扫描，并且只有需要时才附加行号。</p></article>
+        <article class="insight amber-line"><h3>为什么仍需 VACUUM</h3><p>delete files 越多，读取和元数据规划越重；压实把逻辑删除重新物化成干净数据文件。</p></article>
+      </div>
+      <div class="warning-note">阈值是策略而不是 Iceberg 规范：默认 20% 和 10,000,000 行来自当前 pg_lake 实现，可通过 GUC 调整。真正合适的值取决于文件大小、更新比例、读写比和 VACUUM 周期。</div>
+    </section>
+
+    <section class="chapter" id="iceberg-scope">
+      <div class="chapter-heading">
+        <div class="chapter-index">06</div>
+        <div>
+          <div class="chapter-kicker">Capability boundary</div>
+          <h2>pg_lake 用到了 Iceberg 哪些能力？Iceberg 的能力范围到哪里？</h2>
+          <p class="chapter-lead">Iceberg 是开放表格式，提供“怎样描述和提交一张湖表”的标准。pg_lake 使用这些标准元数据，但 SQL、事务接入、查询下推、写入策略和运维仍由 PostgreSQL 与 pg_lake 实现。</p>
+        </div>
+      </div>
+      <p class="one-line-answer"><strong>职责边界：</strong>Iceberg 保证不同引擎能理解同一张表的结构和版本；pg_lake 负责让 PostgreSQL 用户真正能创建、查询、修改和维护这张表。</p>
+      <div class="mini-diagram">
+        <svg viewBox="0 0 1200 590" role="img" aria-label="Iceberg 能力范围与 pg_lake 使用关系">
+          <defs><marker id="m-scope" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#64748b"/></marker><pattern id="g-scope" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern></defs>
+          <rect width="1200" height="590" fill="#020617"/><rect width="1200" height="590" fill="url(#g-scope)"/>
+          <path d="M330 268H410" stroke="#a78bfa" stroke-width="2" marker-end="url(#m-scope)"/><path d="M790 268H870" stroke="#fb7185" stroke-width="2" marker-end="url(#m-scope)"/><path d="M600 430V488" stroke="#34d399" stroke-width="2" marker-end="url(#m-scope)"/>
+          <rect x="30" y="52" width="300" height="430" rx="8" fill="#0f172a"/><rect x="30" y="52" width="300" height="430" rx="8" fill="rgba(76,29,149,.28)" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="180" y="88" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">Iceberg 提供什么</text>
+          <text x="180" y="111" fill="#c4b5fd" font-size="9" text-anchor="middle">开放的表格式契约</text>
+          <text x="58" y="151" fill="#c4b5fd" font-size="9">01  Metadata JSON 与 metadata log</text>
+          <text x="58" y="181" fill="#c4b5fd" font-size="9">02  Snapshot 与 snapshot log</text>
+          <text x="58" y="211" fill="#c4b5fd" font-size="9">03  Manifest List / Manifest</text>
+          <text x="58" y="241" fill="#c4b5fd" font-size="9">04  Data/Delete file 描述和统计</text>
+          <text x="58" y="271" fill="#c4b5fd" font-size="9">05  Schema field ID 与 schema evolution</text>
+          <text x="58" y="301" fill="#c4b5fd" font-size="9">06  Partition spec / transform / evolution</text>
+          <text x="58" y="331" fill="#c4b5fd" font-size="9">07  Position delete 等行级删除表达</text>
+          <text x="58" y="361" fill="#c4b5fd" font-size="9">08  Catalog metadata pointer commit</text>
+          <text x="58" y="391" fill="#c4b5fd" font-size="9">09  时间旅行/回滚的元数据基础</text>
+          <text x="58" y="421" fill="#c4b5fd" font-size="9">10  Spark/Trino/Flink 等互操作契约</text>
+          <rect x="410" y="78" width="380" height="352" rx="10" fill="#0f172a"/><rect x="410" y="78" width="380" height="352" rx="10" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="2"/>
+          <text x="600" y="116" fill="#fff" font-size="15" font-weight="700" text-anchor="middle">pg_lake 实际使用的 Iceberg v2 链条</text>
+          <rect x="500" y="143" width="200" height="44" rx="5" fill="rgba(76,29,149,.45)" stroke="#a78bfa"/><text x="600" y="170" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">Catalog metadata_location</text>
+          <path d="M600 187V211" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m-scope)"/>
+          <rect x="485" y="211" width="230" height="44" rx="5" fill="rgba(76,29,149,.4)" stroke="#a78bfa"/><text x="600" y="238" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">Metadata JSON + 当前 Snapshot</text>
+          <path d="M600 255V279" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m-scope)"/>
+          <rect x="485" y="279" width="230" height="44" rx="5" fill="rgba(30,41,59,.7)" stroke="#64748b"/><text x="600" y="306" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">Manifest List -> Manifests</text>
+          <path d="M600 323V347" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m-scope)"/>
+          <rect x="442" y="347" width="145" height="48" rx="5" fill="rgba(120,53,15,.3)" stroke="#fbbf24"/><text x="514" y="368" fill="#fff" font-size="8" text-anchor="middle">Parquet Data Files</text><text x="514" y="385" fill="#94a3b8" font-size="7" text-anchor="middle">stats / partitions / field IDs</text>
+          <rect x="613" y="347" width="145" height="48" rx="5" fill="rgba(120,53,15,.3)" stroke="#fbbf24"/><text x="685" y="368" fill="#fff" font-size="8" text-anchor="middle">Position Delete Files</text><text x="685" y="385" fill="#94a3b8" font-size="7" text-anchor="middle">file_path + row position</text>
+          <text x="600" y="417" fill="#c4b5fd" font-size="8" text-anchor="middle">读时规划文件；写时创建新的不可变版本</text>
+          <rect x="870" y="52" width="300" height="430" rx="8" fill="#0f172a"/><rect x="870" y="52" width="300" height="430" rx="8" fill="rgba(136,19,55,.28)" stroke="#fb7185" stroke-width="1.5"/>
+          <text x="1020" y="88" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">Iceberg 不提供什么</text>
+          <text x="1020" y="111" fill="#fda4af" font-size="9" text-anchor="middle">这些必须由数据库/引擎实现</text>
+          <text x="898" y="151" fill="#fda4af" font-size="9">01  PostgreSQL SQL 语法与类型行为</text>
+          <text x="898" y="181" fill="#fda4af" font-size="9">02  查询引擎与向量化执行</text>
+          <text x="898" y="211" fill="#fda4af" font-size="9">03  索引、Heap pages、WAL、行锁</text>
+          <text x="898" y="241" fill="#fda4af" font-size="9">04  约束、触发器与权限执行</text>
+          <text x="898" y="271" fill="#fda4af" font-size="9">05  PostgreSQL DDL/DML/COPY 解析</text>
+          <text x="898" y="301" fill="#fda4af" font-size="9">06  PostgreSQL 到 Parquet 类型转换</text>
+          <text x="898" y="331" fill="#fda4af" font-size="9">07  COW/MOR 选择阈值与调度</text>
+          <text x="898" y="361" fill="#fda4af" font-size="9">08  VACUUM 周期和孤儿文件清理</text>
+          <text x="898" y="391" fill="#fda4af" font-size="9">09  对象存储凭证、缓存和重试</text>
+          <text x="898" y="421" fill="#fda4af" font-size="9">10  应用侧业务事务模型</text>
+          <rect x="260" y="488" width="680" height="70" rx="7" fill="#0f172a"/><rect x="260" y="488" width="680" height="70" rx="7" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+          <text x="600" y="515" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">pg_lake 在 Iceberg 之上补齐数据库集成层</text>
+          <text x="600" y="539" fill="#6ee7b7" font-size="8" text-anchor="middle">PostgreSQL hooks / FDW / transactions · DuckDB pushdown · file pruning · COW/MOR · Catalog bridge · VACUUM</text>
+        </svg>
+      </div>
+      <div class="insight-grid">
+        <article class="insight violet-line"><h3>规范能力</h3><p>Snapshot、Manifest、字段 ID、分区演化、delete file 和 metadata pointer 都来自 Iceberg 契约。</p></article>
+        <article class="insight green-line"><h3>pg_lake 增值能力</h3><p>SQL 接入、事务 Hook、DuckDB 下推、文件裁剪、写入策略和维护调度由 pg_lake 完成。</p></article>
+        <article class="insight rose-line"><h3>不要过度承诺</h3><p>Iceberg 不是 SQL 引擎、不是权限系统，也不是适合高并发点更新的 OLTP 行存储。</p></article>
+      </div>
+    </section>
+
+    <section class="chapter" id="without-iceberg">
+      <div class="chapter-heading">
+        <div class="chapter-index">07</div>
+        <div>
+          <div class="chapter-kicker">Counterfactual</div>
+          <h2>如果没有 Iceberg，会怎么样？</h2>
+          <p class="chapter-lead">pg_lake 仍可以让 PostgreSQL 通过 DuckDB 读取和写入 Parquet、CSV、JSON，但它会从“湖仓表系统”退化成“文件访问与加速层”。缺少的是长期正确管理一张表的共同标准。</p>
+        </div>
+      </div>
+      <p class="one-line-answer"><strong>本质变化：</strong>还能查文件，不再天然知道“哪些文件是当前表、怎样并发提交新版本、外部引擎如何发现同一张表”。</p>
+      <div class="mini-diagram">
+        <svg viewBox="0 0 1200 510" role="img" aria-label="有无 Iceberg 的 pg_lake 能力对比">
+          <defs><marker id="m-noice" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#64748b"/></marker><pattern id="g-noice" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern></defs>
+          <rect width="1200" height="510" fill="#020617"/><rect width="1200" height="510" fill="url(#g-noice)"/>
+          <path d="M250 143H345" stroke="#34d399" stroke-width="2" marker-end="url(#m-noice)"/><path d="M855 143H950" stroke="#fbbf24" stroke-width="2" marker-end="url(#m-noice)"/>
+          <rect x="35" y="48" width="530" height="405" rx="10" fill="rgba(6,78,59,.08)" stroke="#34d399" stroke-width="1.5"/>
+          <text x="300" y="82" fill="#34d399" font-size="13" font-weight="700" text-anchor="middle">有 Iceberg：一张可演化、可提交、可共享的表</text>
+          <rect x="70" y="108" width="180" height="70" rx="6" fill="#0f172a" stroke="#22d3ee"/><text x="160" y="136" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">PostgreSQL + pg_lake</text><text x="160" y="157" fill="#94a3b8" font-size="8" text-anchor="middle">SQL / Transaction / DML</text>
+          <rect x="345" y="108" width="180" height="70" rx="6" fill="#0f172a" stroke="#a78bfa"/><text x="435" y="136" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">Iceberg Table State</text><text x="435" y="157" fill="#c4b5fd" font-size="8" text-anchor="middle">Snapshot / Manifest / Catalog</text>
+          <rect x="70" y="220" width="455" height="190" rx="6" fill="#0f172a" stroke="#334155"/>
+          <text x="95" y="251" fill="#6ee7b7" font-size="9">+ 标准化当前版本与历史 Snapshot</text>
+          <text x="95" y="281" fill="#6ee7b7" font-size="9">+ Manifest 级文件发现与统计裁剪</text>
+          <text x="95" y="311" fill="#6ee7b7" font-size="9">+ Schema / Partition evolution</text>
+          <text x="95" y="341" fill="#6ee7b7" font-size="9">+ Position delete 与行级删除语义</text>
+          <text x="95" y="371" fill="#6ee7b7" font-size="9">+ Catalog 原子 pointer commit 与冲突检测</text>
+          <text x="95" y="401" fill="#6ee7b7" font-size="9">+ Spark / Trino / PyIceberg 等生态互操作</text>
+          <rect x="635" y="48" width="530" height="405" rx="10" fill="rgba(136,19,55,.08)" stroke="#fb7185" stroke-width="1.5"/>
+          <text x="900" y="82" fill="#fb7185" font-size="13" font-weight="700" text-anchor="middle">没有 Iceberg：仍能读写文件，但“表”变成自定义约定</text>
+          <rect x="675" y="108" width="180" height="70" rx="6" fill="#0f172a" stroke="#22d3ee"/><text x="765" y="136" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">PostgreSQL + pg_lake</text><text x="765" y="157" fill="#94a3b8" font-size="8" text-anchor="middle">FDW / DuckDB pushdown</text>
+          <rect x="950" y="108" width="180" height="70" rx="6" fill="#0f172a" stroke="#fbbf24"/><text x="1040" y="136" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">一组文件路径</text><text x="1040" y="157" fill="#fde68a" font-size="8" text-anchor="middle">Parquet / CSV / JSON</text>
+          <rect x="675" y="220" width="455" height="190" rx="6" fill="#0f172a" stroke="#334155"/>
+          <text x="700" y="251" fill="#6ee7b7" font-size="9">仍有：SQL 接口、DuckDB 扫描、文件导入导出</text>
+          <text x="700" y="284" fill="#fda4af" font-size="9">失去：标准 Snapshot、Manifest 与时间旅行基础</text>
+          <text x="700" y="314" fill="#fda4af" font-size="9">失去：跨引擎一致的 Schema/Partition 演化</text>
+          <text x="700" y="344" fill="#fda4af" font-size="9">失去：标准行级删除和并发提交协议</text>
+          <text x="700" y="374" fill="#fda4af" font-size="9">失去：Catalog 发现与开放生态契约</text>
+          <text x="700" y="401" fill="#fde68a" font-size="8">这些能力只能由 pg_lake 私有实现，互操作和维护成本显著上升</text>
+          <rect x="345" y="468" width="510" height="28" rx="4" fill="rgba(30,41,59,.7)" stroke="#64748b"/>
+          <text x="600" y="487" fill="#e2e8f0" font-size="9" font-weight="600" text-anchor="middle">结论：没有 Iceberg 不是“不能工作”，而是退化为缺少开放表语义的文件系统集成</text>
+        </svg>
+      </div>
+      <div class="insight-grid">
+        <article class="insight green-line"><h3>还保留什么</h3><p>PostgreSQL FDW、DuckDB 文件扫描、COPY 和普通 Parquet/CSV/JSON 读写仍然可以存在。</p></article>
+        <article class="insight rose-line"><h3>真正失去什么</h3><p>标准化版本、提交、演化、删除、发现和跨引擎共享能力，而不仅仅是几个 JSON 文件。</p></article>
+        <article class="insight amber-line"><h3>替代代价</h3><p>所有缺失能力都要变成 pg_lake 私有协议，测试、恢复和生态兼容成本都会上升。</p></article>
+      </div>
+    </section>
+
+    <section class="chapter" id="catalog-basics">
+      <div class="chapter-heading">
+        <div class="chapter-index">08</div>
+        <div>
+          <div class="chapter-kicker">Table discovery and commit</div>
+          <h2>Catalog 是做什么的？为什么需要 Catalog？</h2>
+          <p class="chapter-lead">Iceberg 每次提交都会产生一个新的 metadata.json，旧文件不会被原地覆盖。Catalog 保存“逻辑表名当前指向哪个 metadata.json”，同时提供原子切换和冲突检测。</p>
+        </div>
+      </div>
+      <p class="one-line-answer"><strong>类比：</strong>对象存储里可能有很多版目录；Catalog 是图书馆门口唯一的“当前目录指示牌”，读者按它找最新版，写者只能原子地把指示牌从旧版换到新版。</p>
+      <div class="mini-diagram">
+        <svg viewBox="0 0 1200 590" role="img" aria-label="Iceberg Catalog 元数据指针与乐观提交图解">
+          <defs><marker id="m-cat" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#64748b"/></marker><pattern id="g-cat" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern></defs>
+          <rect width="1200" height="590" fill="#020617"/><rect width="1200" height="590" fill="url(#g-cat)"/>
+          <path d="M235 155H330" stroke="#a78bfa" stroke-width="2" marker-end="url(#m-cat)"/><path d="M555 155H650" stroke="#a78bfa" stroke-width="2" marker-end="url(#m-cat)"/><path d="M880 155H975" stroke="#fbbf24" stroke-width="2" marker-end="url(#m-cat)"/>
+          <path d="M445 205V295" stroke="#64748b" stroke-width="1.5" marker-end="url(#m-cat)"/><path d="M765 205V295" stroke="#64748b" stroke-width="1.5" marker-end="url(#m-cat)"/>
+          <text x="600" y="44" fill="#a78bfa" font-size="11" font-weight="700" text-anchor="middle">读路径：逻辑表名 -> Catalog 当前指针 -> metadata -> snapshot/manifests -> data files</text>
+          <rect x="35" y="105" width="200" height="100" rx="6" fill="#0f172a" stroke="#94a3b8" stroke-width="1.5"/><text x="135" y="137" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">逻辑表名</text><text x="135" y="162" fill="#94a3b8" font-size="9" text-anchor="middle">catalog.namespace.table</text><text x="135" y="184" fill="#94a3b8" font-size="8" text-anchor="middle">不暴露物理 metadata 路径</text>
+          <rect x="330" y="105" width="225" height="100" rx="6" fill="#0f172a"/><rect x="330" y="105" width="225" height="100" rx="6" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/><text x="442" y="137" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">Catalog 当前指针</text><text x="442" y="162" fill="#c4b5fd" font-size="9" text-anchor="middle">metadata_location = v15.json</text><text x="442" y="184" fill="#94a3b8" font-size="8" text-anchor="middle">表发现 + 原子提交点</text>
+          <rect x="650" y="105" width="230" height="100" rx="6" fill="#0f172a"/><rect x="650" y="105" width="230" height="100" rx="6" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/><text x="765" y="137" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">v15 metadata.json</text><text x="765" y="162" fill="#c4b5fd" font-size="8" text-anchor="middle">current snapshot / schema / specs</text><text x="765" y="184" fill="#94a3b8" font-size="8" text-anchor="middle">指向 manifest list</text>
+          <rect x="975" y="105" width="190" height="100" rx="6" fill="#0f172a"/><rect x="975" y="105" width="190" height="100" rx="6" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1.5"/><text x="1070" y="137" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">对象存储文件</text><text x="1070" y="162" fill="#fde68a" font-size="8" text-anchor="middle">manifests / data / deletes</text><text x="1070" y="184" fill="#94a3b8" font-size="8" text-anchor="middle">持久化不可变资产</text>
+          <rect x="300" y="295" width="290" height="72" rx="6" fill="#0f172a" stroke="#64748b"/><text x="445" y="323" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">Writer A 基于 v15 规划变更</text><text x="445" y="347" fill="#94a3b8" font-size="8" text-anchor="middle">先写 data/delete/manifest/v16 metadata</text>
+          <rect x="620" y="295" width="290" height="72" rx="6" fill="#0f172a" stroke="#64748b"/><text x="765" y="323" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">Writer B 也基于 v15 规划变更</text><text x="765" y="347" fill="#94a3b8" font-size="8" text-anchor="middle">先写另一组文件和 v16b metadata</text>
+          <path d="M445 367V408H548" fill="none" stroke="#34d399" stroke-width="2" marker-end="url(#m-cat)"/><path d="M765 367V408H652" fill="none" stroke="#fb7185" stroke-width="2" marker-end="url(#m-cat)"/>
+          <rect x="480" y="408" width="240" height="74" rx="6" fill="#0f172a"/><rect x="480" y="408" width="240" height="74" rx="6" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/><text x="600" y="435" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">Compare-and-Swap</text><text x="600" y="458" fill="#c4b5fd" font-size="8" text-anchor="middle">仅当 current == v15，才改为 v16</text>
+          <path d="M600 482V518" stroke="#34d399" stroke-width="2" marker-end="url(#m-cat)"/>
+          <rect x="345" y="518" width="250" height="50" rx="5" fill="rgba(6,78,59,.35)" stroke="#34d399"/><text x="470" y="539" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">A 成功：pointer v15 -> v16</text><text x="470" y="557" fill="#6ee7b7" font-size="8" text-anchor="middle">新版本对所有读者可见</text>
+          <rect x="605" y="518" width="250" height="50" rx="5" fill="rgba(136,19,55,.3)" stroke="#fb7185"/><text x="730" y="539" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">B 冲突：current 已不是 v15</text><text x="730" y="557" fill="#fda4af" font-size="8" text-anchor="middle">必须重读新基线后重试或失败</text>
+          <text x="600" y="256" fill="#e2e8f0" font-size="10" font-weight="600" text-anchor="middle">Catalog 的价值不是“保存所有数据”，而是权威地管理当前版本指针</text>
+        </svg>
+      </div>
+      <div class="insight-grid">
+        <article class="insight violet-line"><h3>表发现</h3><p>外部引擎通过逻辑表名找到当前 metadata，而不用猜对象存储中哪个 JSON 最新。</p></article>
+        <article class="insight green-line"><h3>原子提交</h3><p>先写不可变文件，最后只原子切换一个指针；读者要么看到旧版本，要么看到新版本。</p></article>
+        <article class="insight rose-line"><h3>并发冲突</h3><p>两个写者都从旧版本开始时，只有一个能先切换指针，另一个必须重新规划。</p></article>
+      </div>
+      <div class="warning-note">对象存储中的“最后修改时间最新”不能替代 Catalog。时钟、并发写入、重试和孤儿文件都会让“猜最新文件”失去可靠性。</div>
+    </section>
+
+    <section class="chapter" id="pglake-catalog">
+      <div class="chapter-heading">
+        <div class="chapter-index">09</div>
+        <div>
+          <div class="chapter-kicker">Catalog responsibilities</div>
+          <h2>pg_lake 承担了哪些 Catalog 能力？</h2>
+          <p class="chapter-lead">pg_lake 既维护 PostgreSQL 内部的表与文件状态，也能桥接 Iceberg REST Catalog 和对象存储 catalog.json；同时把 metadata 变更绑定到 PostgreSQL 事务 Hook。</p>
+        </div>
+      </div>
+      <p class="one-line-answer"><strong>不是单一组件：</strong>pg_lake 的 Catalog 能力分散在本地系统表、兼容视图、REST/Object-store 适配、检查函数和事务提交协调中。</p>
+      <div class="mini-diagram">
+        <svg viewBox="0 0 1200 620" role="img" aria-label="pg_lake Catalog 能力全景图">
+          <defs><marker id="m-pgcat" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#a78bfa"/></marker><pattern id="g-pgcat" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern></defs>
+          <rect width="1200" height="620" fill="#020617"/><rect width="1200" height="620" fill="url(#g-pgcat)"/>
+          <path d="M480 270L300 150" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#m-pgcat)"/><path d="M720 270L900 150" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#m-pgcat)"/><path d="M470 345L270 455" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#m-pgcat)"/><path d="M730 345L930 455" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#m-pgcat)"/><path d="M600 400V520" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#m-pgcat)"/><path d="M600 220V125" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#m-pgcat)"/>
+          <rect x="455" y="220" width="290" height="180" rx="10" fill="#0f172a"/><rect x="455" y="220" width="290" height="180" rx="10" fill="rgba(76,29,149,.45)" stroke="#a78bfa" stroke-width="2"/>
+          <text x="600" y="258" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">pg_lake Catalog Control</text>
+          <text x="600" y="284" fill="#c4b5fd" font-size="9" text-anchor="middle">logical table -> current metadata</text>
+          <text x="600" y="318" fill="#94a3b8" font-size="8" text-anchor="middle">在 PostgreSQL 事务视角中收集变更</text>
+          <text x="600" y="339" fill="#94a3b8" font-size="8" text-anchor="middle">在 PRE_COMMIT 生成 Iceberg metadata</text>
+          <text x="600" y="360" fill="#94a3b8" font-size="8" text-anchor="middle">在 COMMIT 完成外部 Catalog 请求</text>
+          <text x="600" y="383" fill="#fda4af" font-size="8" text-anchor="middle">ABORT 清状态；含 Iceberg 变更时拒绝 PREPARE</text>
+          <rect x="475" y="52" width="250" height="78" rx="6" fill="#0f172a" stroke="#a78bfa"/><text x="600" y="80" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">1. 本地 metadata pointer 注册表</text><text x="600" y="102" fill="#94a3b8" font-size="8" text-anchor="middle">tables_internal / tables_external</text><text x="600" y="119" fill="#c4b5fd" font-size="8" text-anchor="middle">current + previous metadata_location</text>
+          <rect x="70" y="92" width="270" height="116" rx="6" fill="#0f172a" stroke="#a78bfa"/><text x="205" y="121" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">2. PostgreSQL 运行 Catalog</text><text x="205" y="145" fill="#94a3b8" font-size="8" text-anchor="middle">data/delete files · stats · partitions</text><text x="205" y="164" fill="#94a3b8" font-size="8" text-anchor="middle">field IDs · row IDs · deletion map</text><text x="205" y="187" fill="#c4b5fd" font-size="8" text-anchor="middle">支持事务内扫描、裁剪和写入决策</text>
+          <rect x="860" y="92" width="270" height="116" rx="6" fill="#0f172a" stroke="#a78bfa"/><text x="995" y="121" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">3. REST Catalog Bridge</text><text x="995" y="145" fill="#94a3b8" font-size="8" text-anchor="middle">endpoint / OAuth / credentials</text><text x="995" y="164" fill="#94a3b8" font-size="8" text-anchor="middle">load / create / drop / commit requests</text><text x="995" y="187" fill="#c4b5fd" font-size="8" text-anchor="middle">支持只读和可写外部 Iceberg 表</text>
+          <rect x="55" y="422" width="300" height="112" rx="6" fill="#0f172a" stroke="#a78bfa"/><text x="205" y="450" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">4. Object-store Catalog Bridge</text><text x="205" y="474" fill="#94a3b8" font-size="8" text-anchor="middle">导出内部表 pointer 到 catalog.json</text><text x="205" y="493" fill="#94a3b8" font-size="8" text-anchor="middle">读取外部 catalog.json 的 metadata location</text><text x="205" y="516" fill="#c4b5fd" font-size="8" text-anchor="middle">轻量共享，但能力弱于完整 REST 服务</text>
+          <rect x="845" y="422" width="300" height="112" rx="6" fill="#0f172a" stroke="#a78bfa"/><text x="995" y="450" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">5. 标准发现视图</text><text x="995" y="474" fill="#94a3b8" font-size="8" text-anchor="middle">pg_catalog.iceberg_tables</text><text x="995" y="493" fill="#94a3b8" font-size="8" text-anchor="middle">统一暴露内部/外部表 metadata pointer</text><text x="995" y="516" fill="#c4b5fd" font-size="8" text-anchor="middle">供 Spark/JDBC 等生态发现 pg_lake 表</text>
+          <rect x="455" y="520" width="290" height="72" rx="6" fill="#0f172a" stroke="#a78bfa"/><text x="600" y="548" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">6. Metadata 检查与运维接口</text><text x="600" y="571" fill="#94a3b8" font-size="8" text-anchor="middle">metadata() · files() · snapshots() · data_file_stats()</text>
+        </svg>
+      </div>
+      <div class="insight-grid">
+        <article class="insight violet-line"><h3>内部表</h3><p>pg_lake 既保存 metadata pointer，也维护执行所需的文件、统计、分区和删除映射。</p></article>
+        <article class="insight cyan-line"><h3>外部表</h3><p>可以通过 REST Catalog 或 object-store catalog 获取当前 metadata location。</p></article>
+        <article class="insight rose-line"><h3>事务边界最复杂</h3><p>本地 Catalog、对象存储文件和外部 REST 提交不在同一个物理事务中，必须分阶段协调。</p></article>
+      </div>
+    </section>
+
+    <section class="chapter" id="oltp-compare">
+      <div class="chapter-heading">
+        <div class="chapter-index">10</div>
+        <div>
+          <div class="chapter-kicker">Workload fit</div>
+          <h2>pg_lake / Iceberg 和 OLTP 数据库有什么区别？</h2>
+          <p class="chapter-lead">两者都能通过 SQL 修改数据，但物理机制和优化目标完全不同。OLTP 为大量短小、并发、点查点改事务设计；pg_lake/Iceberg 为对象存储上的大规模分析和开放互操作设计。</p>
+        </div>
+      </div>
+      <p class="one-line-answer"><strong>不要把它当替代品：</strong>pg_lake 可以继承 PostgreSQL 事务入口，但湖表文件并不会因此变成适合高频逐行更新的 Heap + WAL + Index 存储。</p>
+      <div class="mini-diagram">
+        <svg viewBox="0 0 1200 555" role="img" aria-label="pg_lake Iceberg 与 OLTP 数据库对比">
+          <defs><marker id="m-oltp" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#64748b"/></marker><pattern id="g-oltp" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern></defs>
+          <rect width="1200" height="555" fill="#020617"/><rect width="1200" height="555" fill="url(#g-oltp)"/>
+          <rect x="35" y="45" width="535" height="450" rx="9" fill="rgba(8,51,68,.08)" stroke="#22d3ee" stroke-width="1.5"/>
+          <text x="302" y="82" fill="#22d3ee" font-size="14" font-weight="700" text-anchor="middle">OLTP 数据库：管理很多小事务</text>
+          <rect x="75" y="110" width="455" height="64" rx="6" fill="#0f172a" stroke="#22d3ee"/><text x="302" y="137" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">App transaction: 查一个订单 -> 改一行 -> 提交</text><text x="302" y="158" fill="#94a3b8" font-size="8" text-anchor="middle">毫秒级、并发高、点查点改、低延迟</text>
+          <path d="M302 174V207" stroke="#22d3ee" stroke-width="2" marker-end="url(#m-oltp)"/>
+          <rect x="75" y="207" width="455" height="105" rx="6" fill="#0f172a" stroke="#22d3ee"/><text x="302" y="235" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">数据库自管存储引擎</text><text x="302" y="260" fill="#94a3b8" font-size="8" text-anchor="middle">Heap/B-tree pages · Buffer Pool · WAL · MVCC row versions</text><text x="302" y="282" fill="#94a3b8" font-size="8" text-anchor="middle">行锁/页锁 · 索引维护 · Crash Recovery</text><text x="302" y="301" fill="#67e8f9" font-size="8" text-anchor="middle">修改少量行时不需要重写大列式文件</text>
+          <text x="92" y="352" fill="#67e8f9" font-size="9">擅长：订单、账户、库存、会话状态</text>
+          <text x="92" y="382" fill="#67e8f9" font-size="9">典型查询：主键点查、短范围、频繁更新</text>
+          <text x="92" y="412" fill="#fda4af" font-size="9">不擅长：直接共享海量对象存储文件给多引擎</text>
+          <text x="92" y="442" fill="#94a3b8" font-size="9">数据拥有者：数据库存储引擎</text>
+          <text x="92" y="470" fill="#94a3b8" font-size="9">原子单位：WAL/MVCC 管理的行、页和事务</text>
+          <rect x="630" y="45" width="535" height="450" rx="9" fill="rgba(76,29,149,.08)" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="897" y="82" fill="#a78bfa" font-size="14" font-weight="700" text-anchor="middle">pg_lake / Iceberg：管理大规模表版本</text>
+          <rect x="670" y="110" width="455" height="64" rx="6" fill="#0f172a" stroke="#a78bfa"/><text x="897" y="137" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">Analytical transaction: 扫很多文件 -> 批量改写 -> 新版本</text><text x="897" y="158" fill="#94a3b8" font-size="8" text-anchor="middle">吞吐优先、批处理、列式分析、开放互操作</text>
+          <path d="M897 174V207" stroke="#a78bfa" stroke-width="2" marker-end="url(#m-oltp)"/>
+          <rect x="670" y="207" width="455" height="105" rx="6" fill="#0f172a" stroke="#a78bfa"/><text x="897" y="235" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">不可变文件 + 元数据版本</text><text x="897" y="260" fill="#94a3b8" font-size="8" text-anchor="middle">Parquet data files · position deletes · snapshots · manifests</text><text x="897" y="282" fill="#94a3b8" font-size="8" text-anchor="middle">对象存储 · Catalog pointer · MOR/COW · Compaction</text><text x="897" y="301" fill="#c4b5fd" font-size="8" text-anchor="middle">修改一行也要表达为文件与 metadata 的新版本</text>
+          <text x="687" y="352" fill="#c4b5fd" font-size="9">擅长：日志、事实表、历史数据、湖仓分析</text>
+          <text x="687" y="382" fill="#c4b5fd" font-size="9">典型查询：大扫描、聚合、批量装载、跨引擎</text>
+          <text x="687" y="412" fill="#fda4af" font-size="9">不擅长：极高并发的逐行点更新和低延迟索引查</text>
+          <text x="687" y="442" fill="#94a3b8" font-size="9">数据拥有者：对象存储 + 开放表格式</text>
+          <text x="687" y="470" fill="#94a3b8" font-size="9">原子单位：新的 metadata pointer / table snapshot</text>
+          <rect x="280" y="514" width="640" height="28" rx="4" fill="rgba(30,41,59,.7)" stroke="#64748b"/><text x="600" y="533" fill="#e2e8f0" font-size="9" font-weight="600" text-anchor="middle">正确选择：热的业务状态放 OLTP；大规模可共享分析数据放 Lakehouse；必要时通过 ETL/CDC 衔接</text>
+        </svg>
+      </div>
+      <div class="insight-grid">
+        <article class="insight cyan-line"><h3>OLTP 优化目标</h3><p>低延迟点查、短事务、高并发更新、强索引和崩溃恢复。</p></article>
+        <article class="insight violet-line"><h3>Lakehouse 优化目标</h3><p>大批量列式扫描、对象存储成本、开放文件和多计算引擎共享。</p></article>
+        <article class="insight amber-line"><h3>pg_lake 的价值</h3><p>让用户保留 PostgreSQL SQL/事务入口，同时把分析数据放进开放湖表。</p></article>
+      </div>
+    </section>
+
+    <section class="chapter" id="lance-compare">
+      <div class="chapter-heading">
+        <div class="chapter-index">11</div>
+        <div>
+          <div class="chapter-kicker">Format choice</div>
+          <h2>pg_lake / Iceberg 和 Lance 有什么区别？</h2>
+          <p class="chapter-lead">二者都面向数据湖，但优化中心不同。Iceberg 强调开放表管理、计算引擎互操作和超大分析表；Lance 同时定义原生文件/表/索引能力，强调随机访问、AI/ML 数据和向量工作流。</p>
+        </div>
+      </div>
+      <p class="one-line-answer"><strong>选择方向：</strong>通用湖仓互操作和 SQL 分析优先研究 Iceberg；向量、Embedding、多模态样本和随机访问优先单独评估 Lance；两者都不是 OLTP 数据库替代品。</p>
+      <div class="mini-diagram">
+        <svg viewBox="0 0 1200 590" role="img" aria-label="Iceberg 与 Lance 能力和适用场景对比">
+          <defs><pattern id="g-lance" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern></defs>
+          <rect width="1200" height="590" fill="#020617"/><rect width="1200" height="590" fill="url(#g-lance)"/>
+          <rect x="35" y="48" width="350" height="470" rx="9" fill="rgba(76,29,149,.08)" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="210" y="86" fill="#a78bfa" font-size="14" font-weight="700" text-anchor="middle">pg_lake + Apache Iceberg</text>
+          <text x="210" y="110" fill="#c4b5fd" font-size="9" text-anchor="middle">开放表格式 + PostgreSQL 集成</text>
+          <rect x="65" y="135" width="290" height="84" rx="6" fill="#0f172a" stroke="#a78bfa"/><text x="210" y="162" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">核心抽象</text><text x="210" y="185" fill="#94a3b8" font-size="8" text-anchor="middle">metadata / snapshot / manifest / catalog</text><text x="210" y="203" fill="#94a3b8" font-size="8" text-anchor="middle">数据文件通常使用 Parquet/ORC/Avro</text>
+          <text x="68" y="257" fill="#c4b5fd" font-size="9">优势</text>
+          <text x="86" y="284" fill="#94a3b8" font-size="9">- Spark / Trino / Flink 等广泛生态</text>
+          <text x="86" y="311" fill="#94a3b8" font-size="9">- PB 级分析表、分区与文件级规划</text>
+          <text x="86" y="338" fill="#94a3b8" font-size="9">- Schema/Partition evolution</text>
+          <text x="86" y="365" fill="#94a3b8" font-size="9">- Snapshot、Catalog、开放提交契约</text>
+          <text x="68" y="405" fill="#c4b5fd" font-size="9">pg_lake 加上的能力</text>
+          <text x="86" y="432" fill="#94a3b8" font-size="9">- PostgreSQL SQL / DML / Transaction</text>
+          <text x="86" y="459" fill="#94a3b8" font-size="9">- DuckDB 下推、MOR/COW、VACUUM</text>
+          <text x="210" y="495" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">最适合：开放 SQL 湖仓与多引擎分析</text>
+          <rect x="425" y="48" width="350" height="470" rx="9" fill="rgba(6,78,59,.08)" stroke="#34d399" stroke-width="1.5"/>
+          <text x="600" y="86" fill="#34d399" font-size="14" font-weight="700" text-anchor="middle">Lance 生态</text>
+          <text x="600" y="110" fill="#6ee7b7" font-size="9" text-anchor="middle">原生文件格式 + 表格式 + 索引格式</text>
+          <rect x="455" y="135" width="290" height="84" rx="6" fill="#0f172a" stroke="#34d399"/><text x="600" y="162" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">核心抽象</text><text x="600" y="185" fill="#94a3b8" font-size="8" text-anchor="middle">Lance fragments / row addressing / versions</text><text x="600" y="203" fill="#94a3b8" font-size="8" text-anchor="middle">原生列式文件、索引与 Catalog 规范</text>
+          <text x="458" y="257" fill="#6ee7b7" font-size="9">优势</text>
+          <text x="476" y="284" fill="#94a3b8" font-size="9">- 快速随机访问和样本级读取</text>
+          <text x="476" y="311" fill="#94a3b8" font-size="9">- 向量/全文等索引工作流</text>
+          <text x="476" y="338" fill="#94a3b8" font-size="9">- Embedding、图像、训练数据演化</text>
+          <text x="476" y="365" fill="#94a3b8" font-size="9">- 面向 AI/ML 的数据版本与检索</text>
+          <text x="458" y="405" fill="#6ee7b7" font-size="9">需要单独评估</text>
+          <text x="476" y="432" fill="#94a3b8" font-size="9">- SQL 计算引擎生态和互操作范围</text>
+          <text x="476" y="459" fill="#94a3b8" font-size="9">- 与 PostgreSQL 事务/DML 的集成方式</text>
+          <text x="600" y="495" fill="#fff" font-size="9" font-weight="600" text-anchor="middle">最适合：AI 数据、向量与低延迟随机访问</text>
+          <rect x="815" y="48" width="350" height="470" rx="9" fill="rgba(30,41,59,.25)" stroke="#94a3b8" stroke-width="1.5"/>
+          <text x="990" y="86" fill="#e2e8f0" font-size="14" font-weight="700" text-anchor="middle">选择问题，而不是只看格式名</text>
+          <text x="990" y="110" fill="#94a3b8" font-size="9" text-anchor="middle">先判断主要工作负载</text>
+          <rect x="845" y="138" width="290" height="84" rx="6" fill="#0f172a" stroke="#a78bfa"/><text x="990" y="165" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">大量 SQL 扫描 + 多引擎共享？</text><text x="990" y="191" fill="#c4b5fd" font-size="10" font-weight="700" text-anchor="middle">优先 Iceberg / pg_lake</text>
+          <rect x="845" y="252" width="290" height="84" rx="6" fill="#0f172a" stroke="#34d399"/><text x="990" y="279" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">向量搜索 + 多模态随机访问？</text><text x="990" y="305" fill="#6ee7b7" font-size="10" font-weight="700" text-anchor="middle">单独评估 Lance</text>
+          <rect x="845" y="366" width="290" height="84" rx="6" fill="#0f172a" stroke="#22d3ee"/><text x="990" y="393" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">高并发点查点改 + 业务事务？</text><text x="990" y="419" fill="#67e8f9" font-size="10" font-weight="700" text-anchor="middle">仍然需要 OLTP 引擎</text>
+          <text x="990" y="484" fill="#fda4af" font-size="8" text-anchor="middle">不要因为都在“数据湖”就认为二者能力完全重叠</text>
+          <rect x="250" y="540" width="700" height="32" rx="4" fill="rgba(30,41,59,.7)" stroke="#64748b"/><text x="600" y="561" fill="#e2e8f0" font-size="9" font-weight="600" text-anchor="middle">Iceberg 更像开放“表管理协议”；Lance 更像面向 AI 的原生“存储 + 表 + 索引”技术栈</text>
+        </svg>
+      </div>
+      <div class="insight-grid">
+        <article class="insight violet-line"><h3>Iceberg 关注点</h3><p>跨引擎表状态、快照、文件规划、演化和 Catalog 提交，底层数据常为 Parquet。</p></article>
+        <article class="insight green-line"><h3>Lance 关注点</h3><p>原生文件/表/索引栈，强调随机访问、向量与 AI/ML 数据生命周期。</p></article>
+        <article class="insight cyan-line"><h3>共同边界</h3><p>二者都是湖上技术，不应直接替代成熟 OLTP 存储引擎的行级事务和索引能力。</p></article>
+      </div>
+    </section>
+
+    <section class="chapter" id="recap">
+      <div class="chapter-heading">
+        <div class="chapter-index">END</div>
+        <div>
+          <div class="chapter-kicker">Mental model</div>
+          <h2>一页复盘：把所有概念串起来</h2>
+          <p class="chapter-lead">从用户 SQL 到对象存储，真正需要记住的是下面这条责任链。遇到任何问题，都先判断它属于 SQL/事务、执行、表格式、Catalog 还是物理文件。</p>
+        </div>
+      </div>
+      <div class="mini-diagram">
+        <svg viewBox="0 0 1200 350" role="img" aria-label="pg_lake 知识复盘图">
+          <defs><marker id="m-recap" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#64748b"/></marker></defs>
+          <rect width="1200" height="350" fill="#020617"/>
+          <path d="M218 157H272" stroke="#64748b" stroke-width="2" marker-end="url(#m-recap)"/><path d="M448 157H502" stroke="#64748b" stroke-width="2" marker-end="url(#m-recap)"/><path d="M678 157H732" stroke="#64748b" stroke-width="2" marker-end="url(#m-recap)"/><path d="M908 157H962" stroke="#64748b" stroke-width="2" marker-end="url(#m-recap)"/>
+          <rect x="38" y="100" width="180" height="114" rx="7" fill="rgba(8,51,68,.4)" stroke="#22d3ee"/><text x="128" y="130" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">PostgreSQL</text><text x="128" y="154" fill="#67e8f9" font-size="8" text-anchor="middle">SQL / 权限 / MVCC / 事务</text><text x="128" y="176" fill="#94a3b8" font-size="8" text-anchor="middle">“用户看到什么”</text><text x="128" y="197" fill="#94a3b8" font-size="8" text-anchor="middle">“何时算提交”</text>
+          <rect x="272" y="100" width="176" height="114" rx="7" fill="rgba(6,78,59,.4)" stroke="#34d399"/><text x="360" y="130" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">pg_lake</text><text x="360" y="154" fill="#6ee7b7" font-size="8" text-anchor="middle">FDW / Hooks / Catalog Bridge</text><text x="360" y="176" fill="#94a3b8" font-size="8" text-anchor="middle">“怎样翻译与协调”</text><text x="360" y="197" fill="#94a3b8" font-size="8" text-anchor="middle">MOR/COW / VACUUM</text>
+          <rect x="502" y="100" width="176" height="114" rx="7" fill="rgba(6,78,59,.4)" stroke="#34d399"/><text x="590" y="130" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">DuckDB</text><text x="590" y="154" fill="#6ee7b7" font-size="8" text-anchor="middle">Vectorized Execution</text><text x="590" y="176" fill="#94a3b8" font-size="8" text-anchor="middle">“怎样快速读写文件”</text><text x="590" y="197" fill="#94a3b8" font-size="8" text-anchor="middle">scan / join / aggregate</text>
+          <rect x="732" y="100" width="176" height="114" rx="7" fill="rgba(76,29,149,.4)" stroke="#a78bfa"/><text x="820" y="130" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Iceberg + Catalog</text><text x="820" y="154" fill="#c4b5fd" font-size="8" text-anchor="middle">Table Format + Current Pointer</text><text x="820" y="176" fill="#94a3b8" font-size="8" text-anchor="middle">“哪些文件是当前表”</text><text x="820" y="197" fill="#94a3b8" font-size="8" text-anchor="middle">“怎样原子发布新版本”</text>
+          <rect x="962" y="100" width="200" height="114" rx="7" fill="rgba(120,53,15,.3)" stroke="#fbbf24"/><text x="1062" y="130" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">Parquet + Object Store</text><text x="1062" y="154" fill="#fde68a" font-size="8" text-anchor="middle">File Format + Durable Bytes</text><text x="1062" y="176" fill="#94a3b8" font-size="8" text-anchor="middle">“每个文件怎样编码”</text><text x="1062" y="197" fill="#94a3b8" font-size="8" text-anchor="middle">“真实数据放在哪里”</text>
+          <rect x="105" y="262" width="990" height="52" rx="6" fill="rgba(30,41,59,.65)" stroke="#64748b"/>
+          <text x="600" y="284" fill="#fff" font-size="10" font-weight="600" text-anchor="middle">读：PostgreSQL 规划 -> Iceberg/Catalog 找文件 -> DuckDB 扫描 -> PostgreSQL 返回</text>
+          <text x="600" y="302" fill="#cbd5e1" font-size="9" text-anchor="middle">写：PostgreSQL DML -> DuckDB 写文件 -> pg_lake 生成 Iceberg 新版本 -> Catalog pointer commit</text>
+        </svg>
+      </div>
+      <p class="source-note">内容依据本目录深度调研结果：<a href="../results/Pg_lake_Overall_Architecture.json">整体架构</a>、<a href="../results/Pg_lake_SELECT_Retrieval_Flow.json">SELECT</a>、<a href="../results/Pg_lake_IUD_Flow_and_Fast_MOR.json">IUD/MOR</a>、<a href="../results/Iceberg_Capability_Scope_and_Pg_lake_Usage.json">Iceberg 边界</a>、<a href="../results/Catalog_Role_and_Pg_lake_Catalog_Responsibilities.json">Catalog</a>、<a href="../results/Comparative_Analysis_OLTP_Lance_File_Format_Table_Format.json">OLTP/Lance</a>。</p>
+    </section>
+
+    <p class="footer">pg_lake 全景入门图解 · 依据仓库实现与 6 份深度调研结果绘制 · PostgreSQL + DuckDB + Apache Iceberg</p>
+  </div>
+
+  <script>
+    async function captureDiagram() {
+      const el = document.getElementById("report-container");
+      const r = el.getBoundingClientRect();
+      const pad = 32;
+      return html2canvas(document.body, {
+        backgroundColor: "#020617",
+        scale: 2,
+        useCORS: true,
+        ignoreElements: (node) => node.classList && node.classList.contains("toolbar"),
+        x: r.left + window.scrollX - pad,
+        y: r.top + window.scrollY - pad,
+        width: r.width + pad * 2,
+        height: r.height + pad * 2
+      });
+    }
+    async function copyAsImage(btn) {
+      const label = btn.textContent;
+      try {
+        const canvas = await captureDiagram();
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        btn.textContent = "Copied";
+      } catch (error) { btn.textContent = "Failed"; }
+      setTimeout(() => { btn.textContent = label; }, 1800);
+    }
+    async function downloadPNG(btn) {
+      const label = btn.textContent;
+      btn.textContent = "Working";
+      try {
+        const canvas = await captureDiagram();
+        const link = document.createElement("a");
+        link.download = "pg-lake-overall-architecture.png";
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+        btn.textContent = "Done";
+      } catch (error) { btn.textContent = "Failed"; }
+      setTimeout(() => { btn.textContent = label; }, 1800);
+    }
+    async function downloadPDF(btn) {
+      const label = btn.textContent;
+      btn.textContent = "Working";
+      try {
+        const canvas = await captureDiagram();
+        const { jsPDF } = window.jspdf;
+        const orientation = canvas.width > canvas.height ? "landscape" : "portrait";
+        const pdf = new jsPDF({ orientation, unit: "px", format: [canvas.width, canvas.height], hotfixes: ["px_scaling"] });
+        pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, canvas.width, canvas.height);
+        pdf.save("pg-lake-overall-architecture.pdf");
+        btn.textContent = "Done";
+      } catch (error) { btn.textContent = "Failed"; }
+      setTimeout(() => { btn.textContent = label; }, 1800);
+    }
+  </script>
+</body>
+</html>
